@@ -311,6 +311,59 @@
             text-align: center; color: #282838;
             padding: 28px; font-size: 13px; letter-spacing: 1px;
         }
+
+        /* ── Trade button ──────────────────────────────── */
+        #tradeBtn {
+            display: none;
+            margin: 18px auto 0;
+            padding: 14px 36px;
+            font-family: inherit;
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            text-align: center;
+            transition: transform .15s, box-shadow .15s;
+        }
+        #tradeBtn:hover {
+            transform: translateY(-2px);
+        }
+        #tradeBtn:active { transform: translateY(0); }
+        #tradeBtn.btn-long {
+            background: linear-gradient(135deg, #00b856, #00e07a);
+            color: #001a0d;
+            box-shadow: 0 0 24px rgba(0,200,96,.5), 0 4px 16px rgba(0,0,0,.4);
+            animation: btnPulse 1.4s ease-in-out infinite;
+        }
+        #tradeBtn.btn-short {
+            background: linear-gradient(135deg, #c02020, #e03030);
+            color: #fff0f0;
+            box-shadow: 0 0 24px rgba(224,48,48,.5), 0 4px 16px rgba(0,0,0,.4);
+            animation: btnPulse 1.4s ease-in-out infinite;
+        }
+        @keyframes btnPulse {
+            0%,100% { box-shadow: 0 0 20px rgba(255,255,255,.12), 0 4px 16px rgba(0,0,0,.4); }
+            50%     { box-shadow: 0 0 40px rgba(255,255,255,.28), 0 4px 20px rgba(0,0,0,.5); }
+        }
+
+        /* ── Sound toggle (header) ─────────────────────── */
+        #soundBtn {
+            background: none;
+            border: 1px solid #2a2a40;
+            border-radius: 5px;
+            color: #555;
+            font-family: inherit;
+            font-size: 12px;
+            letter-spacing: 1px;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: border-color .2s, color .2s;
+        }
+        #soundBtn.on  { border-color: #00a050; color: #00c860; }
+        #soundBtn.off { border-color: #2a2a40; color: #555; }
     </style>
 </head>
 <body>
@@ -321,7 +374,8 @@
 <header>
     <div class="logo">₿TC <span>MONITOR</span></div>
     <div class="toggle-group">
-        <span class="toggle-label">消息面模式</span>
+        <button id="soundBtn" class="off" onclick="toggleSound()">🔔 提示音 OFF</button>
+        <span class="toggle-label" style="margin-left:8px">消息面模式</span>
         <label class="switch">
             <input type="checkbox" id="newsToggle" onchange="onNewsToggle()">
             <span class="knob"></span>
@@ -376,6 +430,10 @@
         <div class="sig-label">SIGNAL STATUS</div>
         <div id="sigText" class="st-neutral">— &nbsp;待&nbsp;机&nbsp;中&nbsp; —</div>
         <div id="sigDesc">等待首次数据…</div>
+        <a id="tradeBtn" href="https://www.kraken.com/trade/BTC-USD"
+           target="_blank" rel="noopener noreferrer">
+            🚀 &nbsp;立即去 Kraken 下单
+        </a>
     </div>
 
     <!-- Stats row -->
@@ -420,13 +478,73 @@
 'use strict';
 
 const API   = 'https://api.kraken.com/0/public/Ticker?pair=XBTUSD';
-const TICK  = 30;   // seconds between fetches
+const TICK  = 5;    // seconds between fetches
 
 let newsMode      = false;
 let countdown     = TICK;
 let lastSigLevel  = 'neutral';
 let history       = [];         // max 10 entries
 let tickTimer     = null;
+
+// ── Audio ──────────────────────────────────────────────
+let audioCtx      = null;
+let soundEnabled  = false;
+
+function toggleSound() {
+    // AudioContext MUST be created inside a user-gesture handler
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    soundEnabled = !soundEnabled;
+    const btn = document.getElementById('soundBtn');
+    btn.className   = soundEnabled ? 'on' : 'off';
+    btn.textContent = soundEnabled ? '🔔 提示音 ON' : '🔔 提示音 OFF';
+
+    // Play a soft confirmation beep so the user knows audio works
+    if (soundEnabled) _beep(660, 0.08, 'sine', 0, 0.18);
+}
+
+/** Low-level: play one tone */
+function _beep(freq, gain, type, startOffset, dur) {
+    if (!audioCtx) return;
+    const osc  = audioCtx.createOscillator();
+    const gain_ = audioCtx.createGain();
+    osc.connect(gain_);
+    gain_.connect(audioCtx.destination);
+    osc.type      = type;
+    osc.frequency.value = freq;
+    gain_.gain.setValueAtTime(gain, audioCtx.currentTime + startOffset);
+    gain_.gain.exponentialRampToValueAtTime(0.0001,
+        audioCtx.currentTime + startOffset + dur);
+    osc.start(audioCtx.currentTime + startOffset);
+    osc.stop(audioCtx.currentTime  + startOffset + dur + 0.02);
+}
+
+/**
+ * Play alert sequence:
+ *  long  → three ascending beeps (440 → 554 → 660 Hz)
+ *  short → three descending beeps (660 → 554 → 440 Hz)
+ *  warning → two neutral beeps
+ */
+function playBeep(level) {
+    if (!soundEnabled || !audioCtx) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    if (level === 'long') {
+        _beep(440, 0.22, 'square', 0.00, 0.18);
+        _beep(554, 0.22, 'square', 0.22, 0.18);
+        _beep(660, 0.28, 'square', 0.44, 0.28);
+    } else if (level === 'short') {
+        _beep(660, 0.22, 'square', 0.00, 0.18);
+        _beep(554, 0.22, 'square', 0.22, 0.18);
+        _beep(440, 0.28, 'square', 0.44, 0.28);
+    } else if (level === 'warning') {
+        _beep(520, 0.18, 'sine', 0.00, 0.15);
+        _beep(520, 0.18, 'sine', 0.22, 0.15);
+    }
+}
 
 // ── helpers ────────────────────────────────────────────
 
@@ -483,15 +601,24 @@ function applySignalUI(level, textHTML, desc) {
     const card = document.getElementById('signalCard');
     const txt  = document.getElementById('sigText');
     const dsc  = document.getElementById('sigDesc');
+    const btn  = document.getElementById('tradeBtn');
 
-    // Card class
     card.className = 'card s-' + level;
-
-    // Text colour
-    txt.className = 'st-' + level;
-    txt.innerHTML = textHTML;
-
+    txt.className  = 'st-' + level;
+    txt.innerHTML  = textHTML;
     dsc.textContent = desc;
+
+    // Trade button: only shown on actionable signals
+    if (level === 'long') {
+        btn.style.display = 'block';
+        btn.className = 'btn-long';
+    } else if (level === 'short') {
+        btn.style.display = 'block';
+        btn.className = 'btn-short';
+    } else {
+        btn.style.display = 'none';
+        btn.className = '';
+    }
 }
 
 function updateSignal(pct, price) {
@@ -530,9 +657,12 @@ function updateSignal(pct, price) {
         t.classList.add('flash');
     }
 
-    // Record to history when signal level escalates (not on every tick)
-    if (level !== 'neutral' && level !== lastSigLevel) {
-        pushHistory(price, pct, level);
+    // Beep + record history only when signal level changes
+    if (level !== lastSigLevel) {
+        if (level !== 'neutral') {
+            playBeep(level);
+            pushHistory(price, pct, level);
+        }
     }
 
     lastSigLevel = level;
