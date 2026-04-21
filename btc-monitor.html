@@ -590,10 +590,18 @@ function onNewsToggle() {
 /**
  * Returns 'long' | 'short' | 'warning' | 'neutral'
  */
-function classify(pct) {
+function classify(pct, high, low, vwap, vol, price) {
     const a = Math.abs(pct);
-    if (a >= 10) return pct > 0 ? 'long' : 'short';
-    if (a >= 5)  return 'warning';
+    const range = (high - low) / low * 100;
+    const isTrending = range > 8;
+    const vwapDiff = (price - vwap) / vwap * 100;
+
+    if (a >= 3) {
+        if (isTrending && a < 8) return 'warning';
+        if (pct >= 3 && vwapDiff > 2) return 'short';
+        if (pct <= -3 && vwapDiff < -2) return 'long';
+        return 'warning';
+    }
     return 'neutral';
 }
 
@@ -621,13 +629,13 @@ function applySignalUI(level, textHTML, desc) {
     }
 }
 
-function updateSignal(pct, price) {
+function updateSignal(pct, price, high, low, vwap, vol) {
     if (newsMode) {
         applySignalUI('paused', '⏸ &nbsp;消息面模式', '信号已屏蔽 — 高波动期间请勿依赖技术信号');
         return;
     }
 
-    const level = classify(pct);
+    const level = classify(pct, high, low, vwap, vol, price);
     const abs   = Math.abs(pct).toFixed(2);
     const dir   = pct >= 0 ? '+' : '-';
 
@@ -755,7 +763,7 @@ async function fetchTicker() {
             parseFloat(bid).toFixed(0) + ' / ' + parseFloat(ask).toFixed(0);
 
         // ── Signal
-        updateSignal(pct, price);
+        updateSignal(pct, price, high, low, vwap, vol);
 
         // ── Status
         dot.className       = 'dot';
