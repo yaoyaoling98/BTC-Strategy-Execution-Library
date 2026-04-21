@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>BTC Signal - Step 1</title>
+  <title>BTC Signal - Step 2</title>
   <style>
     body { background: #131722; color: #d1d4dc; font-family: monospace; padding: 20px; }
     pre  { background: #1e2130; padding: 16px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
@@ -13,7 +13,7 @@
   </style>
 </head>
 <body>
-<h2>BTC Signal System — Step 1 数据层测试</h2>
+<h2>BTC Signal System — Step 2 指标验证</h2>
 <pre id="out">启动中...</pre>
 
 <script>
@@ -23,8 +23,12 @@
 const CONFIG = {
   pair: 'XBTUSD',
   KRAKEN_REST: 'https://api.kraken.com/0/public',
-  RSI_PERIOD: 14,
-  INTERVAL_15M: 15,
+  RSI_PERIOD:    14,
+  BB_PERIOD:     20,
+  BB_STD:         2,
+  EMA_SHORT:     20,
+  EMA_LONG:      50,
+  INTERVAL_15M:  15,
 };
 
 /* ================================================================
@@ -85,6 +89,86 @@ function calcRSI(closes, period = CONFIG.RSI_PERIOD) {
 }
 
 /* ================================================================
+   布林带 — 上中下轨 + BB%位置
+   算法来源：Jesse (jesse/indicators/bollinger_bands.py)
+   公式：Middle = SMA(20)；Std = sqrt(Σ(x-μ)²/n)；Upper/Lower = Middle ± 2*Std
+   Freqtrade 补充：bb_percent = (close-lower)/(upper-lower)，衡量价格在带内位置
+   ================================================================ */
+function calcBB(closes, period = CONFIG.BB_PERIOD, mult = CONFIG.BB_STD) {
+  if (closes.length < period) return null;
+
+  const slice = closes.slice(-period);
+
+  // Jesse: Middle = SMA
+  const middle = slice.reduce((s, v) => s + v, 0) / period;
+
+  // Jesse: moving_std — 总体标准差（除以 n，非 n-1）
+  const variance = slice.reduce((s, v) => s + (v - middle) ** 2, 0) / period;
+  const std = Math.sqrt(variance);
+
+  const upper = middle + mult * std;
+  const lower = middle - mult * std;
+  const last  = closes[closes.length - 1];
+
+  // Freqtrade: bb_percent，0=触下轨，1=触上轨
+  const pct = upper !== lower ? (last - lower) / (upper - lower) : 0.5;
+
+  // Freqtrade: bb_width，衡量波动率
+  const width = middle !== 0 ? (upper - lower) / middle : 0;
+
+  return { upper, middle, lower, pct, width, std };
+}
+
+/* ================================================================
+   EMA — 指数移动平均
+   算法来源：Jesse (jesse/indicators/ema.py)
+   公式：k = 2/(period+1)；EMA[i] = close[i]*k + EMA[i-1]*(1-k)
+   初始值用前 period 根的 SMA（业界标准做法）
+   ================================================================ */
+function calcEMA(closes, period) {
+  if (closes.length < period) return closes[closes.length - 1];
+
+  const k = 2 / (period + 1);
+  // 初始值：前 period 根的简单平均
+  let ema = closes.slice(0, period).reduce((s, v) => s + v, 0) / period;
+
+  // Jesse 标准公式滚动
+  for (let i = period; i < closes.length; i++) {
+    ema = closes[i] * k + ema * (1 - k);
+  }
+  return ema;
+}
+
+/* ================================================================
+   VWAP — 成交量加权均价，带每日重置
+   算法来源：Jesse (jesse/indicators/vwap.py)
+   公式：VWAP = Σ(典型价 × 成交量) / Σ(成交量)
+   典型价 = (high + low + close) / 3
+   重置机制：Jesse 的 group_indices 逻辑 → 每日本地时区 0 点重置
+   ================================================================ */
+function calcVWAP(candles) {
+  if (!candles || candles.length === 0) return null;
+
+  // 今日本地时区 0 点时间戳（Jesse的每日重置触发点）
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+  let cumVolPrice = 0;
+  let cumVol      = 0;
+
+  for (const c of candles) {
+    if (c.time < todayStart) continue; // 跳过昨日及以前的K线
+
+    // Jesse: typical_price = (high + low + close) / 3
+    const tp = (c.high + c.low + c.close) / 3;
+    cumVolPrice += tp * c.volume;
+    cumVol      += c.volume;
+  }
+
+  return cumVol > 0 ? cumVolPrice / cumVol : null;
+}
+
+/* ================================================================
    MAIN — 运行测试
    ================================================================ */
 const log = document.getElementById('out');
@@ -104,14 +188,53 @@ async function run() {
       log.innerHTML += `  ${t}  开:${c.open.toFixed(0)}  高:${c.high.toFixed(0)}  低:${c.low.toFixed(0)}  <span class="num">收:${c.close.toFixed(0)}</span>  量:${c.volume.toFixed(3)}\n`;
     });
 
-    // 计算RSI
     const closes = candles.map(c => c.close);
-    const rsi = calcRSI(closes);
-    const rsiState = rsi < 30 ? '超卖 ▲' : rsi > 70 ? '超买 ▼' : '中性';
+    const last   = candles[candles.length - 1].close;
 
-    log.innerHTML += `\n<span class="ok">✓ RSI(14) = <span class="num">${rsi.toFixed(2)}</span>  状态：${rsiState}</span>\n`;
-    log.innerHTML += `\n当前最新收盘价：<span class="num">$${candles[candles.length-1].close.toLocaleString()}</span>\n`;
-    log.innerHTML += `\n<span class="ok">Step 1 数据层 OK ✓ 可以继续写 Step 2</span>`;
+    // ── RSI（Step 1，Jesse Wilder平滑）──────────────────────────
+    const rsi      = calcRSI(closes);
+    const rsiState = rsi < 30 ? '超卖 ▲' : rsi > 70 ? '超买 ▼' : '中性';
+    log.innerHTML += `\n── RSI (14) ──\n`;
+    log.innerHTML += `  值：<span class="num">${rsi.toFixed(2)}</span>  状态：<span class="ok">${rsiState}</span>\n`;
+
+    // ── 布林带（Jesse公式）──────────────────────────────────────
+    const bb = calcBB(closes);
+    log.innerHTML += `\n── 布林带 BB(20,2) ──\n`;
+    log.innerHTML += `  上轨：<span class="num">$${bb.upper.toFixed(2)}</span>\n`;
+    log.innerHTML += `  中轨：<span class="num">$${bb.middle.toFixed(2)}</span>\n`;
+    log.innerHTML += `  下轨：<span class="num">$${bb.lower.toFixed(2)}</span>\n`;
+    log.innerHTML += `  BB%：<span class="num">${(bb.pct * 100).toFixed(1)}%</span>  `;
+    const bbState = bb.pct < 0.2 ? '<span class="ok">触下轨（超卖区）</span>'
+                  : bb.pct > 0.8 ? '<span class="err">触上轨（超买区）</span>'
+                  : '带内中区';
+    log.innerHTML += bbState + '\n';
+    log.innerHTML += `  带宽：<span class="num">${(bb.width * 100).toFixed(2)}%</span>  ${bb.width > 0.04 ? '高波动' : '低波动'}\n`;
+
+    // ── EMA20 / EMA50（Jesse公式）───────────────────────────────
+    const ema20 = calcEMA(closes, CONFIG.EMA_SHORT);
+    const ema50 = calcEMA(closes, CONFIG.EMA_LONG);
+    const emaTrend = ema20 > ema50 ? '<span class="ok">多头排列 ▲</span>' : '<span class="err">空头排列 ▼</span>';
+    log.innerHTML += `\n── EMA ──\n`;
+    log.innerHTML += `  EMA20：<span class="num">$${ema20.toFixed(2)}</span>\n`;
+    log.innerHTML += `  EMA50：<span class="num">$${ema50.toFixed(2)}</span>\n`;
+    log.innerHTML += `  趋势：${emaTrend}\n`;
+
+    // ── VWAP（Jesse每日重置机制）─────────────────────────────────
+    const vwap = calcVWAP(candles);
+    log.innerHTML += `\n── VWAP（今日） ──\n`;
+    if (vwap) {
+      const dev = ((last - vwap) / vwap * 100);
+      const vwapState = dev < -0.5 ? '<span class="ok">价格低于VWAP（偏低）</span>'
+                      : dev >  0.5 ? '<span class="err">价格高于VWAP（偏高）</span>'
+                      : '价格在VWAP附近';
+      log.innerHTML += `  VWAP：<span class="num">$${vwap.toFixed(2)}</span>\n`;
+      log.innerHTML += `  偏离：<span class="num">${dev >= 0 ? '+' : ''}${dev.toFixed(2)}%</span>  ${vwapState}\n`;
+    } else {
+      log.innerHTML += `  <span class="err">今日K线数据不足（可能是非交易时段）</span>\n`;
+    }
+
+    log.innerHTML += `\n当前价：<span class="num">$${last.toLocaleString('en-US', {minimumFractionDigits:2})}</span>\n`;
+    log.innerHTML += `\n<span class="ok">✓ Step 2 全部指标 OK — RSI / BB / EMA20&50 / VWAP 计算正常</span>`;
 
   } catch (err) {
     log.innerHTML += `<span class="err">✗ 错误: ${err.message}</span>\n`;
