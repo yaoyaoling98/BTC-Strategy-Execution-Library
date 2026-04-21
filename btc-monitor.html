@@ -596,10 +596,10 @@ function classify(pct, high, low, vwap, vol, price) {
     const isTrending = range > 8;
     const vwapDiff = (price - vwap) / vwap * 100;
 
-    if (a >= 3) {
+    if (a >= 0.1) {
         if (isTrending && a < 8) return 'warning';
-        if (pct >= 3 && vwapDiff > 2) return 'short';
-        if (pct <= -3 && vwapDiff < -2) return 'long';
+        if (pct >= 0.1 && vwapDiff > 2) return 'short';
+        if (pct <= -0.1 && vwapDiff < -2) return 'long';
         return 'warning';
     }
     return 'neutral';
