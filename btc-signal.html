@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>BTC Signal - Step 1</title>
+  <style>
+    body { background: #131722; color: #d1d4dc; font-family: monospace; padding: 20px; }
+    pre  { background: #1e2130; padding: 16px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+    h2   { color: #f59e0b; margin: 20px 0 8px; }
+    .ok  { color: #26a69a; }
+    .err { color: #ef5350; }
+    .num { color: #7986ff; }
+  </style>
+</head>
+<body>
+<h2>BTC Signal System — Step 1 数据层测试</h2>
+<pre id="out">启动中...</pre>
+
+<script>
+/* ================================================================
+   CONFIG
+   ================================================================ */
+const CONFIG = {
+  pair: 'XBTUSD',
+  KRAKEN_REST: 'https://api.kraken.com/0/public',
+  RSI_PERIOD: 14,
+  INTERVAL_15M: 15,
+};
+
+/* ================================================================
+   KRAKEN API — 数据层
+   参考 Freqtrade 的 OHLCV 标准化结构
+   Kraken返回: [time, open, high, low, close, vwap, volume, count]
+   ================================================================ */
+async function fetchOHLC(interval = 15) {
+  const url = `${CONFIG.KRAKEN_REST}/OHLC?pair=${CONFIG.pair}&interval=${interval}`;
+  const resp = await fetch(url);
+  const data = await resp.json();
+
+  if (data.error && data.error.length > 0) throw new Error(data.error[0]);
+
+  // Kraken 有时用 XXBTZUSD，做兼容处理
+  const raw = data.result[CONFIG.pair] || data.result['XXBTZUSD'];
+
+  // 标准化为 {time(ms), open, high, low, close, volume}
+  return raw.map(c => ({
+    time:   c[0] * 1000,
+    open:   parseFloat(c[1]),
+    high:   parseFloat(c[2]),
+    low:    parseFloat(c[3]),
+    close:  parseFloat(c[4]),
+    volume: parseFloat(c[6]),
+  }));
+}
+
+/* ================================================================
+   RSI — Wilder平滑算法
+   算法来源：Jesse (jesse/indicators/rsi.py)
+   与简单SMA的区别：用 (prev*13 + curr)/14 滚动，而非重新平均
+   ================================================================ */
+function calcRSI(closes, period = CONFIG.RSI_PERIOD) {
+  if (closes.length < period + 1) return null;
+
+  // 第一步：前 period 根的简单平均作为初始值
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) avgGain += d;
+    else        avgLoss += Math.abs(d);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+
+  // 第二步：Wilder平滑滚动（Jesse的核心算法）
+  // 公式: avg = (prev_avg × (period-1) + current) / period
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    avgGain = (avgGain * (period - 1) + (d > 0 ? d : 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + (d < 0 ? Math.abs(d) : 0)) / period;
+  }
+
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+
+/* ================================================================
+   MAIN — 运行测试
+   ================================================================ */
+const log = document.getElementById('out');
+
+async function run() {
+  log.innerHTML = '正在连接 Kraken API...\n';
+
+  try {
+    log.innerHTML += '获取 15分钟 K线...\n';
+    const candles = await fetchOHLC(CONFIG.INTERVAL_15M);
+    log.innerHTML += `<span class="ok">✓ 获取成功，共 ${candles.length} 根K线</span>\n\n`;
+
+    // 显示最新5根K线
+    log.innerHTML += '最新5根 15分钟K线：\n';
+    candles.slice(-5).forEach(c => {
+      const t = new Date(c.time).toLocaleString('zh-CN');
+      log.innerHTML += `  ${t}  开:${c.open.toFixed(0)}  高:${c.high.toFixed(0)}  低:${c.low.toFixed(0)}  <span class="num">收:${c.close.toFixed(0)}</span>  量:${c.volume.toFixed(3)}\n`;
+    });
+
+    // 计算RSI
+    const closes = candles.map(c => c.close);
+    const rsi = calcRSI(closes);
+    const rsiState = rsi < 30 ? '超卖 ▲' : rsi > 70 ? '超买 ▼' : '中性';
+
+    log.innerHTML += `\n<span class="ok">✓ RSI(14) = <span class="num">${rsi.toFixed(2)}</span>  状态：${rsiState}</span>\n`;
+    log.innerHTML += `\n当前最新收盘价：<span class="num">$${candles[candles.length-1].close.toLocaleString()}</span>\n`;
+    log.innerHTML += `\n<span class="ok">Step 1 数据层 OK ✓ 可以继续写 Step 2</span>`;
+
+  } catch (err) {
+    log.innerHTML += `<span class="err">✗ 错误: ${err.message}</span>\n`;
+    console.error(err);
+  }
+}
+
+run();
+</script>
+</body>
+</html>
