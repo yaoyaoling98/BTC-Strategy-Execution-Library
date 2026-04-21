@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>BTC Signal - Step 3</title>
+  <title>BTC Signal - Step 4A</title>
   <style>
     body { background: #131722; color: #d1d4dc; font-family: monospace; padding: 20px; }
     pre  { background: #1e2130; padding: 16px; border-radius: 6px; font-size: 13px; line-height: 1.8; }
@@ -80,6 +80,61 @@
       margin-bottom: 12px;
     }
     #refresh-btn:hover { background: rgba(41,98,255,0.2); }
+
+    /* ── 自动刷新倒计时 ── */
+    #countdown {
+      display: inline-block;
+      margin-left: 12px;
+      color: #787b86;
+      font-size: 12px;
+    }
+
+    /* ── 信号历史表格 ── */
+    #history-section {
+      margin-top: 20px;
+    }
+    #history-section h3 {
+      color: #787b86;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    .sig-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .sig-table th {
+      text-align: left;
+      padding: 6px 10px;
+      color: #4a4f5e;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid #2a2e39;
+    }
+    .sig-table td {
+      padding: 7px 10px;
+      border-bottom: 1px solid #1e2130;
+      font-variant-numeric: tabular-nums;
+    }
+    .sig-table tr:hover td { background: #1e2130; }
+    .dir-buy  { color: #26a69a; font-weight: 600; }
+    .dir-sell { color: #ef5350; font-weight: 600; }
+    .strength-strong { color: #ffd700; }
+    .strength-weak   { color: #787b86; }
+    .btn-clear {
+      padding: 4px 12px;
+      border-radius: 3px;
+      border: 1px solid #2a2e39;
+      background: transparent;
+      color: #787b86;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: monospace;
+    }
+    .btn-clear:hover { border-color: #ef5350; color: #ef5350; }
   </style>
 </head>
 <body>
@@ -99,9 +154,33 @@
 </div>
 
 <button id="refresh-btn" onclick="run()">↻ 刷新数据</button>
+<span id="countdown"></span>
 
 <!-- 指标 + 评分详情 -->
 <pre id="out">启动中...</pre>
+
+<!-- 信号历史记录 -->
+<div id="history-section">
+  <h3>📋 信号触发历史 <button class="btn-clear" onclick="clearHistory()" style="margin-left:12px">清空</button></h3>
+  <table class="sig-table">
+    <thead>
+      <tr>
+        <th>时间</th>
+        <th>方向</th>
+        <th>强度</th>
+        <th>评分</th>
+        <th>入场价</th>
+        <th>止损价</th>
+        <th>RSI</th>
+        <th>BB%</th>
+        <th>EMA趋势</th>
+      </tr>
+    </thead>
+    <tbody id="history-body">
+      <tr><td colspan="9" style="color:#4a4f5e;text-align:center;padding:16px">暂无触发记录</td></tr>
+    </tbody>
+  </table>
+</div>
 
 <script>
 /* ================================================================
@@ -355,6 +434,81 @@ function generateSignal(closes, candles, volumes) {
 }
 
 /* ================================================================
+   SIGNAL HISTORY — localStorage 持久化
+   ================================================================ */
+const HISTORY_KEY = 'btc_signal_history';
+
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveHistory(list) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(-50))); // 最多保留50条
+}
+
+function logSignal(sig, candles) {
+  // 只记录真正触发的信号（≥70分 且 风控通过）
+  if (sig.score < CONFIG.SIG_THRESHOLD || !sig.risk.pass) return;
+
+  const history = loadHistory();
+  const last = history[history.length - 1];
+  const now  = Date.now();
+
+  // 同方向信号30分钟内不重复记录，避免刷屏
+  if (last && last.direction === sig.direction && (now - last.ts) < 30 * 60 * 1000) return;
+
+  const { rsi, bb, ema20, ema50, last: price } = sig.raw;
+  const stopPrice = sig.direction === 'BUY' ? sig.stopLong : sig.stopShort;
+
+  history.push({
+    ts:        now,
+    time:      new Date(now).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
+    direction: sig.direction,
+    strength:  sig.strength,
+    score:     sig.score,
+    price:     price.toFixed(2),
+    stop:      stopPrice,
+    rsi:       rsi ? rsi.toFixed(1) : '--',
+    bbPct:     bb  ? (bb.pct * 100).toFixed(1) + '%' : '--',
+    emaTrend:  ema20 > ema50 ? '多头' : '空头',
+  });
+
+  saveHistory(history);
+}
+
+function renderHistory() {
+  const history = loadHistory();
+  const tbody = document.getElementById('history-body');
+
+  if (history.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" style="color:#4a4f5e;text-align:center;padding:16px">暂无触发记录</td></tr>';
+    return;
+  }
+
+  // 倒序显示，最新在最上
+  tbody.innerHTML = history.slice().reverse().map(h => `
+    <tr>
+      <td style="color:#787b86">${h.time}</td>
+      <td class="${h.direction === 'BUY' ? 'dir-buy' : 'dir-sell'}">${h.direction === 'BUY' ? '▲ 做多' : '▼ 做空'}</td>
+      <td class="${h.score >= 85 ? 'strength-strong' : 'strength-weak'}">${h.strength}</td>
+      <td style="color:#7986ff;font-weight:600">${h.score}</td>
+      <td>$${Number(h.price).toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+      <td style="color:#ef5350">$${Number(h.stop).toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+      <td style="color:#d1d4dc">${h.rsi}</td>
+      <td style="color:#d1d4dc">${h.bbPct}</td>
+      <td style="color:${h.emaTrend==='多头'?'#26a69a':'#ef5350'}">${h.emaTrend}</td>
+    </tr>
+  `).join('');
+}
+
+function clearHistory() {
+  if (!confirm('确认清空所有历史记录？')) return;
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+}
+
+/* ================================================================
    消息面开关
    ================================================================ */
 function toggleNews() {
@@ -422,6 +576,8 @@ async function run() {
     // ── 生成信号 ────────────────────────────────────────────────
     const sig = generateSignal(closes, candles, volumes);
     renderSignalBox(sig);
+    logSignal(sig, candles);   // 达标才记录到历史
+    renderHistory();            // 每次刷新都重绘历史表
 
     // ── 打印详情 ────────────────────────────────────────────────
     const { rsi, bb, vwap, ema20, ema50, volRatio } = sig.raw;
@@ -485,7 +641,22 @@ async function run() {
   }
 }
 
+// ── 自动刷新（每30秒） ────────────────────────────────────────
+let countdown = 30;
+const cdEl = document.getElementById('countdown');
+
+function tickCountdown() {
+  countdown--;
+  cdEl.textContent = `下次刷新 ${countdown}s`;
+  if (countdown <= 0) {
+    countdown = 30;
+    run();
+  }
+}
+
 run();
+renderHistory(); // 页面加载时先渲染已有历史
+setInterval(tickCountdown, 1000);
 </script>
 </body>
 </html>
