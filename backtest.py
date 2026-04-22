@@ -10,7 +10,7 @@ BTC/USD 均值回归策略回测  —  增量计算版（O(n)）
     价格锚点基于 BTC 真实历史区间。
 """
 
-import math, random
+import math, random, urllib.request, json, ssl
 from datetime import datetime
 
 # ── 配置 ──────────────────────────────────────────────────────────
@@ -28,6 +28,35 @@ TAKE_PROFIT   = 0.030
 EOD_HOUR_UTC  = 22
 
 INTERVAL_SEC  = 900    # 15分钟
+
+# ── OKX 真实数据拉取 ──────────────────────────────────────────────
+def fetch_okx_candles(inst_id='BTC-USDT', bar='15m', limit=300):
+    url = (f"https://www.okx.com/api/v5/market/history-candles"
+           f"?instId={inst_id}&bar={bar}&limit={limit}")
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode    = ssl.CERT_NONE
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+        data = json.loads(resp.read())
+    if data.get('code') != '0':
+        raise RuntimeError(f"OKX API error: {data.get('msg')}")
+    rows = data['data']
+    rows.reverse()   # OKX 返回最新在前，翻转为时间正序
+    candles = []
+    for row in rows:
+        candles.append({
+            'time':   int(row[0]) // 1000,
+            'open':   float(row[1]),
+            'high':   float(row[2]),
+            'low':    float(row[3]),
+            'close':  float(row[4]),
+            'volume': float(row[5]),
+        })
+    t0 = datetime.utcfromtimestamp(candles[0]['time']).strftime('%Y-%m-%d %H:%M')
+    t1 = datetime.utcfromtimestamp(candles[-1]['time']).strftime('%Y-%m-%d %H:%M')
+    print(f"OKX真实K线: {len(candles)} 根  {t0} → {t1} (UTC)")
+    return candles
 
 # ── 模拟数据生成 ──────────────────────────────────────────────────
 # 价格锚点（基于 BTC 历史真实价格）
@@ -204,14 +233,18 @@ def score_vol(r):
     return 0
 
 # ── 回测引擎 ──────────────────────────────────────────────────────
-WARMUP = max(RSI_PERIOD, EMA_LONG, BB_PERIOD, MA200_PERIOD) + VOL_PERIOD + 1
+WARMUP_BASE = max(RSI_PERIOD, EMA_LONG, BB_PERIOD) + VOL_PERIOD + 1  # 71根
 
 def run_backtest(candles, rsi, bb, e20, e50, vwr, vwap, ma200):
     trades   = []
     position = None
-    closes   = [c['close'] for c in candles]
 
-    for i in range(WARMUP, len(candles)):
+    # 有MA200数据则从第一个有效值开始，否则用基础预热
+    first_ma = next((i for i, v in enumerate(ma200) if v is not None), None)
+    warmup   = max(first_ma, WARMUP_BASE) if first_ma is not None else WARMUP_BASE
+    print(f"  预热期: {warmup} 根K线，开始回测...")
+
+    for i in range(warmup, len(candles)):
         c     = candles[i]
         price = c['close']
         dt    = datetime.utcfromtimestamp(c['time'])
@@ -241,13 +274,15 @@ def run_backtest(candles, rsi, bb, e20, e50, vwr, vwap, ma200):
             else:
                 continue
 
-        # ── MA200 市场状态判断 ────────────────────────────────────
+        # ── MA200 市场状态判断（数据不足时默认震荡市）───────────────
         ma = ma200[i]
-        if ma is None: continue
-        ratio = price / ma
-        if   ratio > 1 + MA200_BAND: mkt = 'BULL'     # 牛市：禁止做空
-        elif ratio < 1 - MA200_BAND: mkt = 'BEAR'     # 熊市：禁止做多
-        else:                        mkt = 'RANGING'  # 震荡市：多空都允许
+        if ma is not None:
+            ratio = price / ma
+            if   ratio > 1 + MA200_BAND: mkt = 'BULL'
+            elif ratio < 1 - MA200_BAND: mkt = 'BEAR'
+            else:                        mkt = 'RANGING'
+        else:
+            mkt = 'RANGING'  # 不足200日历史，不限制方向
 
         # ── 评分和方向投票 ────────────────────────────────────────
         rs, rv = score_rsi(rsi[i])
@@ -324,8 +359,9 @@ def print_stats(trades):
         for t in mt: mr *= (1 + t['pnl'])
         print(f"  {labels[mkt]:<12}{len(mt):>4}笔  胜率{mw/len(mt)*100:.0f}%  收益{(mr-1)*100:>+.1f}%")
     print("─"*W)
-    print(f"  {'年份':<6}{'交易':>6}{'胜率':>8}{'收益':>9}")
-    for yr in [2022, 2023, 2024]:
+    print(f"  {'年月':<8}{'交易':>6}{'胜率':>8}{'收益':>9}")
+    years = sorted(set(t['entry_time'].year for t in trades))
+    for yr in years:
         yt = [t for t in trades if t['entry_time'].year == yr]
         if not yt: continue
         yw  = sum(1 for t in yt if t['pnl'] > 0) / len(yt) * 100
@@ -336,10 +372,15 @@ def print_stats(trades):
 
 # ── 主程序 ────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    candles = generate_candles()
+    try:
+        print("正在从 OKX 拉取真实K线数据...")
+        candles = fetch_okx_candles(limit=300)
+    except Exception as e:
+        print(f"OKX 获取失败（{e}），切换为模拟数据...\n")
+        candles = generate_candles()
+
     print("预计算指标中（含MA200）...")
     rsi, bb, e20, e50, vwr, vwap, ma200 = precompute(candles)
-    print(f"开始回测（预热期 {WARMUP} 根，MA200 ±{MA200_BAND*100:.0f}%）...")
-    trades  = run_backtest(candles, rsi, bb, e20, e50, vwr, vwap, ma200)
+    trades = run_backtest(candles, rsi, bb, e20, e50, vwr, vwap, ma200)
     print(f"完成，共 {len(trades)} 笔交易\n")
     print_stats(trades)
