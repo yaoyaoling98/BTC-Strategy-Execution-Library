@@ -15,8 +15,8 @@
     /* 顶栏 */
     #topbar { display: flex; align-items: center; gap: 18px; padding: 11px 24px; background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
     .logo   { font-weight: 700; font-size: 15px; color: var(--orange); letter-spacing: 1px; flex-shrink: 0; }
-    #tb-price  { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
-    #tb-change { font-size: 13px; font-weight: 600; }
+    #tb-price  { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    #tb-change { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 5px; }
     .tb-sep    { color: var(--border); }
     #tb-status { font-size: 11px; color: var(--muted); margin-left: auto; display: flex; align-items: center; gap: 8px; }
     .dot       { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
@@ -519,7 +519,8 @@ async function run() {
     const chgEl = document.getElementById('tb-change');
     if (chg24h !== null) {
       chgEl.textContent = (chg24h >= 0 ? '+' : '') + chg24h.toFixed(2) + '%';
-      chgEl.style.color = chg24h >= 0 ? '#26a69a' : '#ef5350';
+      chgEl.style.color      = '#fff';
+      chgEl.style.background = chg24h >= 0 ? '#26a69a' : '#ef5350';
     }
 
     // ── 生成信号 ────────────────────────────────────────────────
