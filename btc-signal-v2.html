@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>BTC Signal v2</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d1117; --card: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e;
+      --orange: #f7931a; --green: #26a69a; --red: #ef5350; --blue: #7986ff;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; }
+
+    /* 顶栏 */
+    #topbar { display: flex; align-items: center; gap: 18px; padding: 11px 24px; background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
+    .logo   { font-weight: 700; font-size: 15px; color: var(--orange); letter-spacing: 1px; flex-shrink: 0; }
+    #tb-price  { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    #tb-change { font-size: 13px; font-weight: 600; }
+    .tb-sep    { color: var(--border); }
+    #tb-status { font-size: 11px; color: var(--muted); margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .dot       { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+
+    /* 主内容区 */
+    #page { max-width: 1080px; margin: 0 auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+
+    /* 卡片 */
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+    .card-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); margin-bottom: 14px; }
+
+    /* 两列 */
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 680px) { .cols { grid-template-columns: 1fr; } }
+
+    /* 信号框 */
+    #signal-box { border: 2px solid var(--border); display: none; }
+    #signal-box.buy     { border-color: var(--green);  background: rgba(38,166,154,.07);  }
+    #signal-box.sell    { border-color: var(--red);    background: rgba(239,83,80,.07);   }
+    #signal-box.blocked { border-color: var(--orange); background: rgba(247,147,26,.07);  }
+    .sig-direction { font-size: 24px; font-weight: 700; letter-spacing: 2px; margin-bottom: 10px; }
+    .sig-direction.buy     { color: var(--green);  }
+    .sig-direction.sell    { color: var(--red);    }
+    .sig-direction.blocked { color: var(--orange); }
+    .sig-meta { font-size: 13px; line-height: 2.1; font-family: monospace; }
+
+    /* 控制行 */
+    #controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    #news-btn    { padding: 5px 14px; border-radius: 5px; border: 1px solid var(--border); background: transparent; color: var(--text); font-size: 12px; cursor: pointer; }
+    #news-btn.active { border-color: var(--red); color: var(--red); }
+    #refresh-btn { padding: 5px 14px; border-radius: 5px; border: 1px solid var(--blue); background: rgba(121,134,255,.1); color: var(--blue); font-size: 12px; cursor: pointer; }
+    #countdown   { font-size: 11px; color: var(--muted); }
+
+    /* pre 输出 */
+    pre  { background: var(--bg); padding: 14px 16px; border-radius: 6px; font-size: 12px; line-height: 1.8; overflow-x: auto; font-family: monospace; }
+    .ok  { color: var(--green);  }
+    .err { color: var(--red);    }
+    .num { color: var(--blue);   }
+    .warn{ color: var(--orange); }
+
+    /* 历史表格 */
+    .sig-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .sig-table th { text-align: left; padding: 6px 10px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--border); }
+    .sig-table td { padding: 8px 10px; border-bottom: 1px solid #1c2128; font-variant-numeric: tabular-nums; }
+    .sig-table tr:last-child td { border-bottom: none; }
+    .sig-table tr:hover td { background: rgba(255,255,255,.025); }
+    .dir-buy  { color: var(--green); font-weight: 600; }
+    .dir-sell { color: var(--red);   font-weight: 600; }
+    .strength-strong { color: #ffd700; }
+    .strength-weak   { color: var(--muted); }
+    .btn-clear { padding: 3px 10px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+    .btn-clear:hover { border-color: var(--red); color: var(--red); }
+  </style>
+</head>
+<body>
+
+<!-- ── 顶栏 ── -->
+<div id="topbar">
+  <span class="logo">₿TC Signal</span>
+  <span class="tb-sep">|</span>
+  <span id="tb-price" style="color:#e6edf3">--</span>
+  <span id="tb-change">--</span>
+  <span class="tb-sep">|</span>
+  <span style="font-size:12px;color:#8b949e">BTC/USD · Kraken · 15m</span>
+  <div id="tb-status">
+    <span id="countdown"></span>
+    <span class="dot"></span>
+    <button id="news-btn" onclick="toggleNews()">⚠ 消息面 OFF</button>
+    <button id="refresh-btn" onclick="run()">↻ 刷新</button>
+  </div>
+</div>
+
+<!-- ── 主内容 ── -->
+<div id="page">
+
+  <!-- 信号卡片（有信号才显示） -->
+  <div class="card" id="signal-box">
+    <div class="card-title">信号结论</div>
+    <div class="sig-direction" id="sig-dir">--</div>
+    <div class="sig-meta" id="sig-meta"></div>
+  </div>
+
+  <!-- 指标 + 历史 两列 -->
+  <div class="cols">
+    <div class="card">
+      <div class="card-title">📊 指标数值 & 评分</div>
+      <pre id="out">启动中...</pre>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 信号触发历史 <button class="btn-clear" onclick="clearHistory()" style="margin-left:10px">清空</button></div>
+      <table class="sig-table">
+        <thead>
+          <tr><th>时间</th><th>方向</th><th>强度</th><th>评分</th><th>入场价</th><th>止损价</th><th>RSI</th><th>BB%</th><th>EMA</th></tr>
+        </thead>
+        <tbody id="history-body">
+          <tr><td colspan="9" style="color:#8b949e;text-align:center;padding:20px">暂无记录</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ================================================================
+   CONFIG
+   ================================================================ */
+const CONFIG = {
+  pair:         'XBTUSD',
+  KRAKEN_REST:  'https://api.kraken.com/0/public',
+  RSI_PERIOD:   14,
+  BB_PERIOD:    20,
+  BB_STD:        2,
+  EMA_SHORT:    20,
+  EMA_LONG:     50,
+  VOL_PERIOD:   20,   // 成交量均值周期
+  INTERVAL_15M: 15,
+  SIG_THRESHOLD: 70,  // 70分以上才出信号
+  STOP_LOSS_PCT: 0.015, // 止损 1.5%
+};
+
+// 消息面开关状态
+let newsFilterOn = false;
+
+/* ================================================================
+   KRAKEN API — 数据层
+   参考 Freqtrade 的 OHLCV 标准化结构
+   ================================================================ */
+async function fetchOHLC(interval = 15) {
+  const url = `${CONFIG.KRAKEN_REST}/OHLC?pair=${CONFIG.pair}&interval=${interval}`;
+  const resp = await fetch(url);
+  const data = await resp.json();
+  if (data.error && data.error.length > 0) throw new Error(data.error[0]);
+  const raw = data.result[CONFIG.pair] || data.result['XXBTZUSD'];
+  return raw.map(c => ({
+    time:   c[0] * 1000,
+    open:   parseFloat(c[1]),
+    high:   parseFloat(c[2]),
+    low:    parseFloat(c[3]),
+    close:  parseFloat(c[4]),
+    volume: parseFloat(c[6]),
+  }));
+}
+
+/* ================================================================
+   RSI — Wilder平滑算法
+   算法来源：Jesse (jesse/indicators/rsi.py)
+   ================================================================ */
+function calcRSI(closes, period = CONFIG.RSI_PERIOD) {
+  if (closes.length < period + 1) return null;
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) avgGain += d; else avgLoss += Math.abs(d);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+  // Wilder平滑滚动
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    avgGain = (avgGain * (period - 1) + (d > 0 ? d : 0))          / period;
+    avgLoss = (avgLoss * (period - 1) + (d < 0 ? Math.abs(d) : 0)) / period;
+  }
+  if (avgLoss === 0) return 100;
+  return 100 - (100 / (1 + avgGain / avgLoss));
+}
+
+/* ================================================================
+   布林带
+   算法来源：Jesse (jesse/indicators/bollinger_bands.py)
+   Freqtrade 补充：bb_percent, bb_width
+   ================================================================ */
+function calcBB(closes, period = CONFIG.BB_PERIOD, mult = CONFIG.BB_STD) {
+  if (closes.length < period) return null;
+  const slice  = closes.slice(-period);
+  const middle = slice.reduce((s, v) => s + v, 0) / period;
+  const std    = Math.sqrt(slice.reduce((s, v) => s + (v - middle) ** 2, 0) / period);
+  const upper  = middle + mult * std;
+  const lower  = middle - mult * std;
+  const last   = closes[closes.length - 1];
+  const pct    = upper !== lower ? (last - lower) / (upper - lower) : 0.5;
+  const width  = middle !== 0    ? (upper - lower) / middle          : 0;
+  return { upper, middle, lower, pct, width };
+}
+
+/* ================================================================
+   EMA
+   算法来源：Jesse (jesse/indicators/ema.py)
+   ================================================================ */
+function calcEMA(closes, period) {
+  if (closes.length < period) return closes[closes.length - 1];
+  const k = 2 / (period + 1);
+  let ema = closes.slice(0, period).reduce((s, v) => s + v, 0) / period;
+  for (let i = period; i < closes.length; i++) ema = closes[i] * k + ema * (1 - k);
+  return ema;
+}
+
+/* ================================================================
+   VWAP — 每日重置
+   算法来源：Jesse (jesse/indicators/vwap.py)
+   ================================================================ */
+function calcVWAP(candles) {
+  if (!candles || candles.length === 0) return null;
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  let cumVP = 0, cumV = 0;
+  for (const c of candles) {
+    if (c.time < todayStart) continue;
+    const tp = (c.high + c.low + c.close) / 3; // Jesse: typical_price
+    cumVP += tp * c.volume;
+    cumV  += c.volume;
+  }
+  return cumV > 0 ? cumVP / cumV : null;
+}
+
+/* ================================================================
+   成交量比率
+   当前成交量 / 过去N根均量
+   ================================================================ */
+function calcVolRatio(volumes, period = CONFIG.VOL_PERIOD) {
+  if (volumes.length < period + 1) return 1;
+  const avg = volumes.slice(-period - 1, -1).reduce((s, v) => s + v, 0) / period;
+  return avg > 0 ? volumes[volumes.length - 1] / avg : 1;
+}
+
+/* ================================================================
+   SIGNAL ENGINE — 打分系统
+   信号触发结构来源：Freqtrade (sample_strategy.py) 的"穿越"逻辑
+   打分维度：RSI 25分 + BB 25分 + VWAP 25分 + 成交量 25分 = 100分
+
+   方向判断：RSI/BB/VWAP 三指标投票，≥2票决定方向
+   分数含义：偏离极端程度，与方向无关（越极端越高分）
+   ================================================================ */
+
+// RSI打分（0-25）+ 投票
+// 算法来源：Freqtrade sample_strategy.py 的 RSI 超买超卖条件
+function scoreRSI(rsi) {
+  if (rsi === null) return { score: 0, vote: 0 };
+  let score = 0, vote = 0;
+  if (rsi <= 20)        { score = 25; vote = +1; }  // 极度超卖 → 强买
+  else if (rsi <= 30)   { score = 20; vote = +1; }  // 超卖区
+  else if (rsi <= 38)   { score = 10; vote = +1; }  // 偏低
+  else if (rsi <= 45)   { score =  4; vote = +1; }  // 轻微偏低
+  else if (rsi < 55)    { score =  0; vote =  0; }  // 中性
+  else if (rsi < 62)    { score =  4; vote = -1; }  // 轻微偏高
+  else if (rsi < 70)    { score = 10; vote = -1; }  // 偏高
+  else if (rsi < 80)    { score = 20; vote = -1; }  // 超买区
+  else                  { score = 25; vote = -1; }  // 极度超买 → 强卖
+  return { score, vote };
+}
+
+// BB打分（0-25）+ 投票
+// 算法来源：Freqtrade 的 bb_percent 条件 + Jesse BB公式
+function scoreBB(pct) {
+  let score = 0, vote = 0;
+  if      (pct <= 0)    { score = 25; vote = +1; }  // 突破下轨
+  else if (pct <= 0.1)  { score = 22; vote = +1; }  // 贴近下轨
+  else if (pct <= 0.2)  { score = 16; vote = +1; }  // 接近下轨
+  else if (pct <= 0.35) { score =  7; vote = +1; }  // 下区
+  else if (pct <= 0.65) { score =  0; vote =  0; }  // 中区，不计分
+  else if (pct <= 0.8)  { score =  7; vote = -1; }  // 上区
+  else if (pct <= 0.9)  { score = 16; vote = -1; }  // 接近上轨
+  else if (pct <= 1.0)  { score = 22; vote = -1; }  // 贴近上轨
+  else                  { score = 25; vote = -1; }  // 突破上轨
+  return { score, vote };
+}
+
+// VWAP打分（0-25）+ 投票（偏离百分比）
+// 算法来源：Jesse (jesse/indicators/vwap.py) 偏离计算
+function scoreVWAP(devPct) {
+  // devPct < 0 = 价格低于VWAP（偏低，做多机会）
+  // devPct > 0 = 价格高于VWAP（偏高，做空机会）
+  const abs = Math.abs(devPct);
+  let score = 0;
+  if      (abs >= 2.0) score = 25;
+  else if (abs >= 1.2) score = 20;
+  else if (abs >= 0.6) score = 14;
+  else if (abs >= 0.3) score =  7;
+  else                 score =  2;
+  const vote = devPct < 0 ? +1 : devPct > 0 ? -1 : 0;
+  return { score, vote };
+}
+
+// 成交量打分（0-25）— 只增强方向，不决定方向
+// 成交量 = 信号"可信度"确认，Freqtrade 所有信号都要求 volume > 0
+function scoreVolume(ratio) {
+  if      (ratio >= 3.0) return 25;
+  else if (ratio >= 2.0) return 20;
+  else if (ratio >= 1.5) return 15;
+  else if (ratio >= 1.2) return 10;
+  else if (ratio >= 1.0) return  5;
+  else                   return  0;  // 缩量，不加分
+}
+
+/* ================================================================
+   RISK MANAGER — 风控层
+   来源：Freqtrade 的 EMA 趋势过滤逻辑（populate_entry_trend 条件）
+   规则：
+     趋势市禁止反向操作 — EMA20<EMA50 时拦截做多；EMA20>EMA50 时拦截做空
+     消息面开关 — 手动屏蔽所有信号
+   ================================================================ */
+function riskCheck(direction, ema20, ema50) {
+  if (newsFilterOn)             return { pass: false, reason: '消息面屏蔽已开启' };
+  if (direction === 'BUY'  && ema20 < ema50) return { pass: false, reason: 'EMA20 < EMA50：空头趋势，禁止做多' };
+  if (direction === 'SELL' && ema20 > ema50) return { pass: false, reason: 'EMA20 > EMA50：多头趋势，禁止做空' };
+  return { pass: true, reason: '通过' };
+}
+
+/* ================================================================
+   generateSignal — 综合打分 → 信号输出
+   ================================================================ */
+function generateSignal(closes, candles, volumes) {
+  const last    = closes[closes.length - 1];
+  const rsi     = calcRSI(closes);
+  const bb      = calcBB(closes);
+  const vwap    = calcVWAP(candles);
+  const ema20   = calcEMA(closes, CONFIG.EMA_SHORT);
+  const ema50   = calcEMA(closes, CONFIG.EMA_LONG);
+  const volRatio = calcVolRatio(volumes);
+
+  // 各指标打分
+  const rsiR  = scoreRSI(rsi);
+  const bbR   = scoreBB(bb ? bb.pct : 0.5);
+  const vwapR = vwap ? scoreVWAP((last - vwap) / vwap * 100) : { score: 0, vote: 0 };
+  const volS  = scoreVolume(volRatio);
+
+  const totalScore = rsiR.score + bbR.score + vwapR.score + volS;
+
+  // 方向：RSI/BB/VWAP 三指标投票（Freqtrade的多条件AND → 我们用多数决）
+  const votes = rsiR.vote + bbR.vote + vwapR.vote;
+  const direction = votes > 0 ? 'BUY' : votes < 0 ? 'SELL' : 'NEUTRAL';
+
+  // 风控检查
+  const risk = riskCheck(direction, ema20, ema50);
+
+  // 信号强度
+  const strength = totalScore >= 85 ? '强信号' : totalScore >= CONFIG.SIG_THRESHOLD ? '弱信号' : '未达阈值';
+
+  // 止损价（入场价 ± 1.5%）
+  const stopLong  = (last * (1 - CONFIG.STOP_LOSS_PCT)).toFixed(2);
+  const stopShort = (last * (1 + CONFIG.STOP_LOSS_PCT)).toFixed(2);
+
+  return {
+    score: totalScore,
+    direction,
+    strength,
+    risk,
+    scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, vol: volS },
+    votes: { rsi: rsiR.vote, bb: bbR.vote, vwap: vwapR.vote },
+    raw: { rsi, bb, vwap, ema20, ema50, volRatio, last },
+    stopLong, stopShort,
+  };
+}
+
+/* ================================================================
+   SIGNAL HISTORY — localStorage 持久化
+   ================================================================ */
+const HISTORY_KEY = 'btc_signal_history';
+
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveHistory(list) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(-50))); // 最多保留50条
+}
+
+function logSignal(sig, candles) {
+  // 只记录真正触发的信号（≥70分 且 风控通过）
+  if (sig.score < CONFIG.SIG_THRESHOLD || !sig.risk.pass) return;
+
+  const history = loadHistory();
+  const last = history[history.length - 1];
+  const now  = Date.now();
+
+  // 同方向信号30分钟内不重复记录，避免刷屏
+  if (last && last.direction === sig.direction && (now - last.ts) < 30 * 60 * 1000) return;
+
+  const { rsi, bb, ema20, ema50, last: price } = sig.raw;
+  const stopPrice = sig.direction === 'BUY' ? sig.stopLong : sig.stopShort;
+
+  history.push({
+    ts:        now,
+    time:      new Date(now).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
+    direction: sig.direction,
+    strength:  sig.strength,
+    score:     sig.score,
+    price:     price.toFixed(2),
+    stop:      stopPrice,
+    rsi:       rsi ? rsi.toFixed(1) : '--',
+    bbPct:     bb  ? (bb.pct * 100).toFixed(1) + '%' : '--',
+    emaTrend:  ema20 > ema50 ? '多头' : '空头',
+  });
+
+  saveHistory(history);
+}
+
+function renderHistory() {
+  const history = loadHistory();
+  const tbody = document.getElementById('history-body');
+
+  if (history.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" style="color:#4a4f5e;text-align:center;padding:16px">暂无触发记录</td></tr>';
+    return;
+  }
+
+  // 倒序显示，最新在最上
+  tbody.innerHTML = history.slice().reverse().map(h => `
+    <tr>
+      <td style="color:#787b86">${h.time}</td>
+      <td class="${h.direction === 'BUY' ? 'dir-buy' : 'dir-sell'}">${h.direction === 'BUY' ? '▲ 做多' : '▼ 做空'}</td>
+      <td class="${h.score >= 85 ? 'strength-strong' : 'strength-weak'}">${h.strength}</td>
+      <td style="color:#7986ff;font-weight:600">${h.score}</td>
+      <td>$${Number(h.price).toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+      <td style="color:#ef5350">$${Number(h.stop).toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+      <td style="color:#d1d4dc">${h.rsi}</td>
+      <td style="color:#d1d4dc">${h.bbPct}</td>
+      <td style="color:${h.emaTrend==='多头'?'#26a69a':'#ef5350'}">${h.emaTrend}</td>
+    </tr>
+  `).join('');
+}
+
+function clearHistory() {
+  if (!confirm('确认清空所有历史记录？')) return;
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+}
+
+/* ================================================================
+   消息面开关
+   ================================================================ */
+function toggleNews() {
+  newsFilterOn = !newsFilterOn;
+  const btn = document.getElementById('news-btn');
+  btn.textContent = newsFilterOn ? 'ON — 信号已全部屏蔽' : 'OFF — 信号正常';
+  btn.classList.toggle('active', newsFilterOn);
+  run(); // 重新计算
+}
+
+/* ================================================================
+   UI — 渲染信号卡片
+   ================================================================ */
+function renderSignalBox(sig) {
+  const box = document.getElementById('signal-box');
+  const dir = document.getElementById('sig-dir');
+  const meta = document.getElementById('sig-meta');
+
+  box.style.display = 'block';
+
+  const aboveThreshold = sig.score >= CONFIG.SIG_THRESHOLD;
+  const blocked = !sig.risk.pass;
+
+  if (blocked || !aboveThreshold) {
+    // 信号被拦截 或 分数不够
+    box.className = blocked ? 'blocked' : '';
+    dir.className = 'sig-direction blocked';
+    const reason = blocked ? `⛔ 风控拦截：${sig.risk.reason}`
+                           : `⏸ 分数不足（${sig.score} < ${CONFIG.SIG_THRESHOLD}，未出信号）`;
+    dir.textContent = blocked ? '信号已拦截' : '等待信号';
+    meta.innerHTML = `<span class="warn">${reason}</span>\n`
+      + `当前评分：<span class="num">${sig.score}/100</span>  方向倾向：${sig.direction}`;
+    return;
+  }
+
+  // 正式信号
+  box.className = sig.direction === 'BUY' ? 'buy' : 'sell';
+  dir.className = `sig-direction ${sig.direction === 'BUY' ? 'buy' : 'sell'}`;
+  dir.textContent = sig.direction === 'BUY' ? '▲ 做多信号' : '▼ 做空信号';
+
+  const stopPrice = sig.direction === 'BUY' ? sig.stopLong : sig.stopShort;
+  const stopDir   = sig.direction === 'BUY' ? '下方止损' : '上方止损';
+
+  meta.innerHTML =
+    `评分：<span class="num">${sig.score}/100</span>  强度：<span class="${sig.score >= 85 ? 'ok' : 'warn'}">${sig.strength}</span>\n`
+  + `入场价：<span class="num">$${sig.raw.last.toLocaleString('en-US', {minimumFractionDigits:2})}</span>\n`
+  + `止损价：<span class="err">$${stopPrice}</span>  （${stopDir} 1.5%）\n`
+  + `风控：<span class="ok">✓ ${sig.risk.reason}</span>`;
+}
+
+/* ================================================================
+   MAIN
+   ================================================================ */
+const log = document.getElementById('out');
+
+async function run() {
+  log.innerHTML = '正在获取数据...\n';
+
+  try {
+    const candles  = await fetchOHLC(CONFIG.INTERVAL_15M);
+    const closes   = candles.map(c => c.close);
+    const volumes  = candles.map(c => c.volume);
+    const last     = closes[closes.length - 1];
+
+    // ── 顶栏价格更新 ─────────────────────────────────────────────
+    const cutoff24h = Date.now() - 24 * 60 * 60 * 1000;
+    const prev24h   = candles.find(c => c.time >= cutoff24h);
+    const chg24h    = prev24h ? (last - prev24h.open) / prev24h.open * 100 : null;
+    document.getElementById('tb-price').textContent = '$' + last.toLocaleString('en-US', {minimumFractionDigits: 2});
+    const chgEl = document.getElementById('tb-change');
+    if (chg24h !== null) {
+      chgEl.textContent = (chg24h >= 0 ? '+' : '') + chg24h.toFixed(2) + '%';
+      chgEl.style.color = chg24h >= 0 ? '#26a69a' : '#ef5350';
+    }
+
+    // ── 生成信号 ────────────────────────────────────────────────
+    const sig = generateSignal(closes, candles, volumes);
+    renderSignalBox(sig);
+    logSignal(sig, candles);
+    renderHistory();
+
+    // ── 打印详情 ────────────────────────────────────────────────
+    const { rsi, bb, vwap, ema20, ema50, volRatio } = sig.raw;
+
+    log.innerHTML = '';
+
+    // 最新3根K线（简洁）
+    log.innerHTML += '最新3根K线：\n';
+    candles.slice(-3).forEach(c => {
+      log.innerHTML += `  ${new Date(c.time).toLocaleTimeString('zh-CN')}  收:<span class="num">${c.close.toFixed(0)}</span>  量:${c.volume.toFixed(2)}\n`;
+    });
+
+    // 指标数值
+    log.innerHTML += `\n指标数值：\n`;
+    log.innerHTML += `  RSI(14)  = <span class="num">${rsi.toFixed(2)}</span>  [${rsi<30?'超卖':rsi>70?'超买':'中性'}]  票：${sig.votes.rsi>0?'▲做多':sig.votes.rsi<0?'▼做空':'中立'}\n`;
+    log.innerHTML += `  BB%      = <span class="num">${(bb.pct*100).toFixed(1)}%</span>   [${bb.pct<0.2?'触下轨':bb.pct>0.8?'触上轨':'中区'}]  票：${sig.votes.bb>0?'▲做多':sig.votes.bb<0?'▼做空':'中立'}\n`;
+    if (vwap) {
+      const dev = (last - vwap) / vwap * 100;
+      log.innerHTML += `  VWAP偏离 = <span class="num">${dev>=0?'+':''}${dev.toFixed(2)}%</span>  [$${vwap.toFixed(2)}]  票：${sig.votes.vwap>0?'▲做多':sig.votes.vwap<0?'▼做空':'中立'}\n`;
+    } else {
+      log.innerHTML += `  VWAP     = <span class="warn">今日数据不足</span>  票：中立\n`;
+    }
+    log.innerHTML += `  成交量比  = <span class="num">${volRatio.toFixed(2)}x</span>  [${volRatio>=1.5?'放量':volRatio<0.7?'缩量':'正常'}]\n`;
+    log.innerHTML += `  EMA20/50 = <span class="num">${ema20.toFixed(0)}</span> / <span class="num">${ema50.toFixed(0)}</span>  [${ema20>ema50?'多头排列':'空头排列'}]\n`;
+
+    // 打分明细
+    log.innerHTML += `\n评分明细（满分100）：\n`;
+
+    const bars = [
+      { label: 'RSI   ', score: sig.scores.rsi,  color: '#2962ff' },
+      { label: 'BB    ', score: sig.scores.bb,   color: '#f59e0b' },
+      { label: 'VWAP  ', score: sig.scores.vwap, color: '#26a69a' },
+      { label: '成交量 ', score: sig.scores.vol,  color: '#9c27b0' },
+    ];
+    bars.forEach(b => {
+      const pct = (b.score / 25 * 100).toFixed(0);
+      const filled = Math.round(b.score / 25 * 20); // 20格条
+      const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
+      log.innerHTML += `  ${b.label} [<span style="color:${b.color}">${bar}</span>] <span class="num">${b.score}/25</span>\n`;
+    });
+    log.innerHTML += `  ${'─'.repeat(40)}\n`;
+    log.innerHTML += `  合计    ${' '.repeat(23)} <span class="num" style="font-size:14px">${sig.score}/100</span>  ${sig.strength}\n`;
+
+    // 投票结果
+    const voteTotal = sig.votes.rsi + sig.votes.bb + sig.votes.vwap;
+    log.innerHTML += `\n方向投票：RSI(${sig.votes.rsi>0?'+1':sig.votes.rsi<0?'-1':' 0'}) + BB(${sig.votes.bb>0?'+1':sig.votes.bb<0?'-1':' 0'}) + VWAP(${sig.votes.vwap>0?'+1':sig.votes.vwap<0?'-1':' 0'}) = ${voteTotal>0?'▲做多':voteTotal<0?'▼做空':'中立'}\n`;
+
+    // 风控状态
+    log.innerHTML += `\n风控检查：`;
+    if (sig.risk.pass) {
+      log.innerHTML += `<span class="ok">✓ 通过</span>\n`;
+    } else {
+      log.innerHTML += `<span class="err">⛔ 拦截 — ${sig.risk.reason}</span>\n`;
+    }
+
+    log.innerHTML += `\n<span class="ok">✓ Step 3 信号引擎 OK</span>  ${new Date().toLocaleTimeString('zh-CN')}`;
+
+  } catch (err) {
+    log.innerHTML += `<span class="err">✗ 错误: ${err.message}</span>\n`;
+    console.error(err);
+  }
+}
+
+// ── 自动刷新（每30秒） ────────────────────────────────────────
+let countdown = 30;
+const cdEl = document.getElementById('countdown');
+
+function tickCountdown() {
+  countdown--;
+  cdEl.textContent = `下次刷新 ${countdown}s`;
+  if (countdown <= 0) {
+    countdown = 30;
+    run();
+  }
+}
+
+run();
+renderHistory(); // 页面加载时先渲染已有历史
+setInterval(tickCountdown, 1000);
+</script>
+</body>
+</html>
