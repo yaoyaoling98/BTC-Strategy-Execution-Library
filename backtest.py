@@ -13,6 +13,8 @@ import math, random
 from datetime import datetime
 
 # ── 配置 ──────────────────────────────────────────────────────────
+ADX_PERIOD    = 14   # ADX市场状态开关阈值
+ADX_THRESHOLD = 25   # <25=震荡市(均值回归)  >=25=趋势市(跟趋势)
 RSI_PERIOD    = 14
 BB_PERIOD     = 20
 BB_STD        = 2
@@ -151,7 +153,55 @@ def precompute(candles):
         cum_v  += c['volume']
         vwap[i] = cum_vp / cum_v if cum_v > 0 else None
 
-    return rsi, bb, e20, e50, vwr, vwap
+    # ── ADX(14) — Wilder平滑，市场状态开关 ─────────────────────
+    # TR / +DM / -DM 原始序列
+    P  = ADX_PERIOD
+    adx     = [None] * n
+    plus_di = [None] * n
+    minus_di= [None] * n
+
+    trs, pdms, mdms = [], [], []
+    for i in range(1, n):
+        h, l, pc = candles[i]['high'], candles[i]['low'], candles[i-1]['close']
+        ph, pl   = candles[i-1]['high'], candles[i-1]['low']
+        tr   = max(h - l, abs(h - pc), abs(l - pc))
+        pdm  = max(h - ph, 0) if (h - ph) > (pl - l) else 0
+        mdm  = max(pl - l, 0) if (pl - l) > (h - ph) else 0
+        trs.append(tr); pdms.append(pdm); mdms.append(mdm)
+
+    # 初始 Wilder 平滑（前 P 根简单求和）
+    str_ = sum(trs[:P])
+    spdm = sum(pdms[:P])
+    smdm = sum(mdms[:P])
+
+    def di(s, t): return 100 * s / t if t else 0
+    dx_vals = []
+
+    for i in range(P, len(trs)):
+        str_  = str_  - str_ / P  + trs[i]
+        spdm  = spdm  - spdm / P  + pdms[i]
+        smdm  = smdm  - smdm / P  + mdms[i]
+        pdi   = di(spdm, str_)
+        mdi   = di(smdm, str_)
+        dx    = 100 * abs(pdi - mdi) / (pdi + mdi) if (pdi + mdi) else 0
+        dx_vals.append((i + 1, pdi, mdi, dx))  # candle index = i+1 (offset by 1 for prev)
+
+    # ADX = Wilder平滑的DX（再经过P期）
+    if len(dx_vals) >= P:
+        adx_val = sum(v[3] for v in dx_vals[:P]) / P
+        idx0 = dx_vals[P-1][0]
+        adx[idx0]      = adx_val
+        plus_di[idx0]  = dx_vals[P-1][1]
+        minus_di[idx0] = dx_vals[P-1][2]
+        for j in range(P, len(dx_vals)):
+            _, pdi, mdi, dx = dx_vals[j]
+            adx_val = (adx_val * (P-1) + dx) / P
+            ci = dx_vals[j][0]
+            adx[ci]      = adx_val
+            plus_di[ci]  = pdi
+            minus_di[ci] = mdi
+
+    return rsi, bb, e20, e50, vwr, vwap, adx, plus_di, minus_di
 
 # ── 打分系统（Freqtrade信号逻辑）─────────────────────────────────
 def score_rsi(v):
@@ -193,7 +243,7 @@ def score_vol(r):
 # ── 回测引擎 ──────────────────────────────────────────────────────
 WARMUP = max(RSI_PERIOD, EMA_LONG, BB_PERIOD) + VOL_PERIOD + 1
 
-def run_backtest(candles, rsi, bb, e20, e50, vwr, vwap):
+def run_backtest(candles, rsi, bb, e20, e50, vwr, vwap, adx, plus_di, minus_di):
     trades   = []
     position = None
     closes   = [c['close'] for c in candles]
@@ -228,24 +278,37 @@ def run_backtest(candles, rsi, bb, e20, e50, vwr, vwap):
             else:
                 continue
 
-        # ── 打分 ────────────────────────────────────────────────
+        # ── ADX 市场状态判断 ─────────────────────────────────────
+        adx_val = adx[i]
+        trending = adx_val is not None and adx_val >= ADX_THRESHOLD
+
+        # ── 共用：先计算评分和方向投票 ───────────────────────────
         rs, rv = score_rsi(rsi[i])
         bs, bv = score_bb(bb[i] if bb[i] is not None else 0.5)
-        if vwap[i]:
-            vs, vv = score_vwap((price - vwap[i]) / vwap[i] * 100)
-        else:
-            vs, vv = 0, 0
+        vs, vv = score_vwap((price - vwap[i]) / vwap[i] * 100) if vwap[i] else (0, 0)
         total  = rs + bs + vs + score_vol(vwr[i])
         votes  = rv + bv + vv
         direc  = 'BUY' if votes > 0 else ('SELL' if votes < 0 else None)
-
         if not direc or total < SIG_THRESHOLD: continue
 
-        # ── 风控：EMA 趋势过滤（Freqtrade 逻辑）────────────────
-        if direc == 'BUY'  and e20[i] is not None and e20[i] < e50[i]: continue
-        if direc == 'SELL' and e20[i] is not None and e20[i] > e50[i]: continue
+        if trending:
+            # ── 趋势市：只允许顺趋势方向的信号（ADX >= 25）───────
+            # 仍需评分≥70，但方向受ADX/DI约束
+            pdi, mdi = plus_di[i], minus_di[i]
+            if pdi is None: continue
+            trend_dir = 'BUY' if pdi > mdi else 'SELL'
+            if direc != trend_dir: continue   # 评分方向与趋势方向不符，跳过
+            if trend_dir == 'BUY'  and e20[i] is not None and e20[i] < e50[i]: continue
+            if trend_dir == 'SELL' and e20[i] is not None and e20[i] > e50[i]: continue
+            direc = trend_dir
+            mode  = 'TREND'
+        else:
+            # ── 震荡市：均值回归（ADX < 25，原有逻辑不变）────────
+            if direc == 'BUY'  and e20[i] is not None and e20[i] < e50[i]: continue
+            if direc == 'SELL' and e20[i] is not None and e20[i] > e50[i]: continue
+            mode = 'MEAN_REV'
 
-        position = {'dir': direc, 'entry': price, 'entry_time': dt, 'score': total}
+        position = {'dir': direc, 'entry': price, 'entry_time': dt, 'mode': mode}
 
     return trades
 
@@ -289,9 +352,22 @@ def print_stats(trades):
     print(f"  总收益（复利）{(eq-1)*100:>+6.1f}%")
     print(f"  最大回撤      {mdd*100:>6.1f}%")
     print("─"*W)
+    mr  = [t for t in trades if t.get('mode') == 'MEAN_REV']
+    tr  = [t for t in trades if t.get('mode') == 'TREND']
+    mr_w = sum(1 for t in mr if t['pnl']>0)
+    tr_w = sum(1 for t in tr if t['pnl']>0)
+    mr_r = 1.0
+    for t in mr: mr_r *= (1+t['pnl'])
+    tr_r = 1.0
+    for t in tr: tr_r *= (1+t['pnl'])
+
     print(f"  止损触发      {sl:>6} 次")
     print(f"  止盈触发      {tp:>6} 次")
     print(f"  日内强平      {eod:>6} 次")
+    print("─"*W)
+    print(f"  策略模式分解（ADX阈值={ADX_THRESHOLD}）")
+    if mr: print(f"  均值回归      {len(mr):>4}笔  胜率{mr_w/len(mr)*100:.0f}%  收益{(mr_r-1)*100:>+.1f}%")
+    if tr: print(f"  趋势跟随      {len(tr):>4}笔  胜率{tr_w/len(tr)*100:.0f}%  收益{(tr_r-1)*100:>+.1f}%")
     print("─"*W)
     print(f"  {'年份':<6}{'交易':>6}{'胜率':>8}{'收益':>9}")
     for yr in [2022, 2023, 2024]:
@@ -306,9 +382,9 @@ def print_stats(trades):
 # ── 主程序 ────────────────────────────────────────────────────────
 if __name__ == '__main__':
     candles = generate_candles()
-    print("预计算指标中...")
-    rsi, bb, e20, e50, vwr, vwap = precompute(candles)
-    print(f"开始回测（预热期 {WARMUP} 根）...")
-    trades  = run_backtest(candles, rsi, bb, e20, e50, vwr, vwap)
+    print("预计算指标中（含ADX）...")
+    rsi, bb, e20, e50, vwr, vwap, adx, plus_di, minus_di = precompute(candles)
+    print(f"开始回测（预热期 {WARMUP} 根，ADX阈值={ADX_THRESHOLD}）...")
+    trades  = run_backtest(candles, rsi, bb, e20, e50, vwr, vwap, adx, plus_di, minus_di)
     print(f"完成，共 {len(trades)} 笔交易\n")
     print_stats(trades)
