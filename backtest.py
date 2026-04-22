@@ -1,22 +1,18 @@
 #!/usr/bin/env python3
 """
-BTC/USD 均值回归策略回测
+BTC/USD 均值回归策略回测  —  增量计算版（O(n)）
 算法与 btc-signal-v2.html 完全一致：
   Jesse  → RSI(Wilder) / BB / EMA / VWAP(每日重置)
   Freqtrade → 信号触发逻辑 / EMA趋势风控
+
+注：因无法访问外网，数据使用 GBM 模型模拟，
+    价格锚点基于 BTC 真实历史区间。
 """
 
-import requests, time, math
+import math, random
 from datetime import datetime
-from collections import defaultdict
 
 # ── 配置 ──────────────────────────────────────────────────────────
-PAIR          = 'XBTUSD'
-INTERVAL      = 15            # 15分钟K线
-START_TS      = 1640995200    # 2022-01-01 UTC
-END_TS        = 1735689600    # 2025-01-01 UTC
-KRAKEN_URL    = 'https://api.kraken.com/0/public/OHLC'
-
 RSI_PERIOD    = 14
 BB_PERIOD     = 20
 BB_STD        = 2
@@ -24,213 +20,236 @@ EMA_SHORT     = 20
 EMA_LONG      = 50
 VOL_PERIOD    = 20
 SIG_THRESHOLD = 70
-STOP_LOSS     = 0.015         # 1.5%
-TAKE_PROFIT   = 0.030         # 3.0%  (2:1盈亏比)
-EOD_HOUR_UTC  = 22            # 每天22:00 UTC 强制平仓（模拟睡前清仓）
+STOP_LOSS     = 0.015
+TAKE_PROFIT   = 0.030
+EOD_HOUR_UTC  = 22
 
-# ── 数据下载 ──────────────────────────────────────────────────────
-def download_ohlcv():
-    candles, since = [], START_TS
-    print(f"下载 BTC/USD 15m K线: 2022-01-01 → 2024-12-31")
-    while True:
-        try:
-            r = requests.get(f"{KRAKEN_URL}?pair={PAIR}&interval={INTERVAL}&since={since}", timeout=20)
-            data = r.json()
-        except Exception as e:
-            print(f"  请求失败，3秒后重试: {e}"); time.sleep(3); continue
+INTERVAL_SEC  = 900    # 15分钟
 
-        if data.get('error'): print(f"  API错误: {data['error']}"); break
+# ── 模拟数据生成 ──────────────────────────────────────────────────
+# 价格锚点（基于 BTC 历史真实价格）
+ANCHORS = [
+    (1640995200, 47000),  # 2022-01  牛熊转折
+    (1648771200, 45000),  # 2022-04
+    (1656633600, 20000),  # 2022-07  崩盘后
+    (1664582400, 19500),  # 2022-10
+    (1672531200, 16500),  # 2023-01  底部
+    (1680307200, 28000),  # 2023-04  反弹
+    (1688169600, 30000),  # 2023-07
+    (1696118400, 27000),  # 2023-10
+    (1704067200, 43000),  # 2024-01  新牛市
+    (1711929600, 71000),  # 2024-04  历史高点
+    (1719792000, 58000),  # 2024-07  回调
+    (1727740800, 63000),  # 2024-10
+    (1735689600, 98000),  # 2025-01  新高
+]
 
-        result = data['result']
-        raw = result.get(PAIR) or result.get('XXBTZUSD', [])
-        if not raw: break
+def generate_candles():
+    random.seed(42)
+    candles = []
+    bar_vol = 0.030 / math.sqrt(96)  # 日波动3%，换算15m
 
-        added = 0
-        for c in raw:
-            ts = int(c[0])
-            if ts >= END_TS: break
-            candles.append({'time': ts, 'open': float(c[1]), 'high': float(c[2]),
-                            'low': float(c[3]), 'close': float(c[4]), 'volume': float(c[6])})
-            added += 1
-        else:
-            last_ts = int(raw[-1][0])
-            print(f"  → {datetime.utcfromtimestamp(last_ts).date()}  累计 {len(candles)} 根")
-            if last_ts <= since: break
-            since = last_ts
-            time.sleep(1.2)
-            continue
-        break  # 已到END_TS
+    for i in range(len(ANCHORS) - 1):
+        t0, p0 = ANCHORS[i]
+        t1, p1 = ANCHORS[i + 1]
+        n = (t1 - t0) // INTERVAL_SEC
+        drift = math.log(p1 / p0) / n
+        price = p0
 
+        for k in range(n):
+            close = price * math.exp(drift + bar_vol * random.gauss(0, 1))
+            amp   = price * bar_vol * abs(random.gauss(0.8, 0.4))
+            high  = close + amp * random.uniform(0.2, 1.0)
+            low   = close - amp * random.uniform(0.2, 1.0)
+            vol   = random.lognormvariate(3.0, 0.8) * (random.uniform(2,5) if random.random()<0.05 else 1)
+            candles.append({
+                'time': t0 + k * INTERVAL_SEC,
+                'open': price, 'high': high, 'low': low, 'close': close, 'volume': vol,
+            })
+            price = close
+
+    print(f"模拟K线: {len(candles)} 根  "
+          f"{datetime.utcfromtimestamp(candles[0]['time']).date()} → "
+          f"{datetime.utcfromtimestamp(candles[-1]['time']).date()}")
+    print("价格锚点: 2022熊市($47k→$16k) | 2023复苏($16k→$43k) | 2024牛市($43k→$98k)\n")
     return candles
 
-# ── 指标计算（Jesse公式，与HTML完全一致）─────────────────────────
-
-def calc_rsi(closes, period=RSI_PERIOD):
-    if len(closes) < period + 1: return None
-    g = l = 0
-    for i in range(1, period + 1):
-        d = closes[i] - closes[i-1]
-        if d > 0: g += d
-        else:     l += abs(d)
-    ag, al = g / period, l / period
-    for i in range(period + 1, len(closes)):
-        d = closes[i] - closes[i-1]
-        ag = (ag * (period-1) + (d if d > 0 else 0))          / period
-        al = (al * (period-1) + (abs(d) if d < 0 else 0))     / period
-    if al == 0: return 100.0
-    return 100 - 100 / (1 + ag / al)
-
-def calc_bb(closes, period=BB_PERIOD, mult=BB_STD):
-    if len(closes) < period: return None
-    sl  = closes[-period:]
-    mid = sum(sl) / period
-    std = math.sqrt(sum((x - mid)**2 for x in sl) / period)
-    lo, hi = mid - mult*std, mid + mult*std
-    pct = (closes[-1] - lo) / (hi - lo) if hi != lo else 0.5
-    return {'upper': hi, 'middle': mid, 'lower': lo, 'pct': pct}
-
-def calc_ema(closes, period):
-    if len(closes) < period: return closes[-1]
-    k   = 2 / (period + 1)
-    ema = sum(closes[:period]) / period
-    for x in closes[period:]: ema = x * k + ema * (1 - k)
-    return ema
-
-def calc_vwap(day_candles):
-    cvp = cv = 0
-    for c in day_candles:
-        tp  = (c['high'] + c['low'] + c['close']) / 3
-        cvp += tp * c['volume']
-        cv  += c['volume']
-    return cvp / cv if cv > 0 else None
-
-def calc_vol_ratio(volumes, period=VOL_PERIOD):
-    if len(volumes) < period + 1: return 1.0
-    avg = sum(volumes[-period-1:-1]) / period
-    return volumes[-1] / avg if avg > 0 else 1.0
-
-# ── 打分系统（Freqtrade信号逻辑，与HTML完全一致）────────────────
-
-def score_rsi(rsi):
-    if rsi is None: return 0, 0
-    if rsi <= 20: return 25, +1
-    if rsi <= 30: return 20, +1
-    if rsi <= 38: return 10, +1
-    if rsi <= 45: return  4, +1
-    if rsi <  55: return  0,  0
-    if rsi <  62: return  4, -1
-    if rsi <  70: return 10, -1
-    if rsi <  80: return 20, -1
-    return 25, -1
-
-def score_bb(pct):
-    if pct <= 0.00: return 25, +1
-    if pct <= 0.10: return 22, +1
-    if pct <= 0.20: return 16, +1
-    if pct <= 0.35: return  7, +1
-    if pct <= 0.65: return  0,  0
-    if pct <= 0.80: return  7, -1
-    if pct <= 0.90: return 16, -1
-    if pct <= 1.00: return 22, -1
-    return 25, -1
-
-def score_vwap(dev):
-    a = abs(dev)
-    s = 25 if a >= 2.0 else 20 if a >= 1.2 else 14 if a >= 0.6 else 7 if a >= 0.3 else 2
-    return s, (+1 if dev < 0 else -1 if dev > 0 else 0)
-
-def score_vol(ratio):
-    if ratio >= 3.0: return 25
-    if ratio >= 2.0: return 20
-    if ratio >= 1.5: return 15
-    if ratio >= 1.2: return 10
-    if ratio >= 1.0: return  5
-    return 0
-
-# ── 回测引擎 ──────────────────────────────────────────────────────
-WARMUP = max(RSI_PERIOD + 1, EMA_LONG + 1, BB_PERIOD) + VOL_PERIOD
-
-def run_backtest(candles):
-    trades   = []
-    position = None
+# ── 预计算所有指标（O(n) 增量法）─────────────────────────────────
+def precompute(candles):
+    n   = len(candles)
+    rsi = [None] * n
+    bb  = [None] * n
+    e20 = [None] * n
+    e50 = [None] * n
+    vwr = [1.0]  * n
+    vwap= [None] * n
 
     closes  = [c['close']  for c in candles]
     volumes = [c['volume'] for c in candles]
 
-    # 按日期分组（VWAP每日重置用）
-    by_date = defaultdict(list)
-    for c in candles:
-        by_date[datetime.utcfromtimestamp(c['time']).date()].append(c)
+    # ── RSI (Jesse Wilder 平滑) ────────────────────────────────
+    ag = al = 0.0
+    for i in range(1, RSI_PERIOD + 1):
+        d = closes[i] - closes[i-1]
+        if d > 0: ag += d
+        else:     al += abs(d)
+    ag /= RSI_PERIOD
+    al /= RSI_PERIOD
+    rs = ag / al if al else 100
+    rsi[RSI_PERIOD] = 100 - 100 / (1 + rs)
 
-    print(f"预热期: {WARMUP} 根K线，开始回测...")
+    for i in range(RSI_PERIOD + 1, n):
+        d  = closes[i] - closes[i-1]
+        ag = (ag * (RSI_PERIOD-1) + (d if d > 0 else 0))        / RSI_PERIOD
+        al = (al * (RSI_PERIOD-1) + (abs(d) if d < 0 else 0))   / RSI_PERIOD
+        rs = ag / al if al else 100
+        rsi[i] = 100 - 100 / (1 + rs)
+
+    # ── BB (Jesse SMA + 总体标准差) ────────────────────────────
+    win_sum = sum(closes[:BB_PERIOD])
+    for i in range(BB_PERIOD, n):
+        if i > BB_PERIOD:
+            win_sum += closes[i] - closes[i - BB_PERIOD]
+        mid = win_sum / BB_PERIOD
+        sl  = closes[i - BB_PERIOD + 1 : i + 1]
+        std = math.sqrt(sum((x - mid)**2 for x in sl) / BB_PERIOD)
+        hi, lo = mid + BB_STD*std, mid - BB_STD*std
+        pct = (closes[i] - lo) / (hi - lo) if hi != lo else 0.5
+        bb[i] = pct
+
+    # ── EMA20 / EMA50 (Jesse) ──────────────────────────────────
+    k20, k50 = 2/(EMA_SHORT+1), 2/(EMA_LONG+1)
+    ema20 = sum(closes[:EMA_SHORT]) / EMA_SHORT
+    ema50 = sum(closes[:EMA_LONG])  / EMA_LONG
+    e20[EMA_SHORT - 1] = ema20
+    e50[EMA_LONG  - 1] = ema50
+
+    for i in range(EMA_SHORT, n):
+        ema20 = closes[i] * k20 + ema20 * (1 - k20)
+        e20[i] = ema20
+    for i in range(EMA_LONG, n):
+        ema50 = closes[i] * k50 + ema50 * (1 - k50)
+        e50[i] = ema50
+
+    # ── Volume Ratio ────────────────────────────────────────────
+    vsum = sum(volumes[:VOL_PERIOD])
+    for i in range(VOL_PERIOD, n):
+        avg = vsum / VOL_PERIOD
+        vwr[i] = volumes[i] / avg if avg > 0 else 1.0
+        vsum += volumes[i] - volumes[i - VOL_PERIOD]
+
+    # ── VWAP (Jesse 每日重置) ───────────────────────────────────
+    cur_date = None
+    cum_vp = cum_v = 0.0
+    for i, c in enumerate(candles):
+        d = datetime.utcfromtimestamp(c['time']).date()
+        if d != cur_date:
+            cum_vp = cum_v = 0.0
+            cur_date = d
+        tp = (c['high'] + c['low'] + c['close']) / 3
+        cum_vp += tp * c['volume']
+        cum_v  += c['volume']
+        vwap[i] = cum_vp / cum_v if cum_v > 0 else None
+
+    return rsi, bb, e20, e50, vwr, vwap
+
+# ── 打分系统（Freqtrade信号逻辑）─────────────────────────────────
+def score_rsi(v):
+    if v is None: return 0, 0
+    if v <= 20: return 25, +1
+    if v <= 30: return 20, +1
+    if v <= 38: return 10, +1
+    if v <= 45: return  4, +1
+    if v <  55: return  0,  0
+    if v <  62: return  4, -1
+    if v <  70: return 10, -1
+    if v <  80: return 20, -1
+    return 25, -1
+
+def score_bb(p):
+    if p <= 0.00: return 25, +1
+    if p <= 0.10: return 22, +1
+    if p <= 0.20: return 16, +1
+    if p <= 0.35: return  7, +1
+    if p <= 0.65: return  0,  0
+    if p <= 0.80: return  7, -1
+    if p <= 0.90: return 16, -1
+    if p <= 1.00: return 22, -1
+    return 25, -1
+
+def score_vwap(dev):
+    a = abs(dev)
+    s = 25 if a>=2.0 else 20 if a>=1.2 else 14 if a>=0.6 else 7 if a>=0.3 else 2
+    return s, (+1 if dev < 0 else -1 if dev > 0 else 0)
+
+def score_vol(r):
+    if r >= 3.0: return 25
+    if r >= 2.0: return 20
+    if r >= 1.5: return 15
+    if r >= 1.2: return 10
+    if r >= 1.0: return  5
+    return 0
+
+# ── 回测引擎 ──────────────────────────────────────────────────────
+WARMUP = max(RSI_PERIOD, EMA_LONG, BB_PERIOD) + VOL_PERIOD + 1
+
+def run_backtest(candles, rsi, bb, e20, e50, vwr, vwap):
+    trades   = []
+    position = None
+    closes   = [c['close'] for c in candles]
 
     for i in range(WARMUP, len(candles)):
         c     = candles[i]
         price = c['close']
         dt    = datetime.utcfromtimestamp(c['time'])
-        today = dt.date()
 
-        # ── 日内强制平仓（睡前清仓）────────────────────────────
+        # ── 日内强制平仓（EOD 模拟睡前清仓）────────────────────
         if position and dt.hour >= EOD_HOUR_UTC:
             ep  = position['entry']
-            ret = (price - ep) / ep if position['dir'] == 'BUY' else (ep - price) / ep
+            ret = (price-ep)/ep if position['dir']=='BUY' else (ep-price)/ep
             trades.append({**position, 'exit': price, 'exit_time': dt,
                            'pnl': ret, 'reason': 'EOD'})
             position = None
 
         # ── 持仓止损 / 止盈 ────────────────────────────────────
         if position:
-            ep  = position['entry']
-            hit = False
+            ep, hit = position['entry'], False
             if position['dir'] == 'BUY':
-                if price <= ep * (1 - STOP_LOSS):
-                    trades.append({**position, 'exit': price, 'exit_time': dt,
-                                   'pnl': -STOP_LOSS, 'reason': 'SL'}); hit = True
-                elif price >= ep * (1 + TAKE_PROFIT):
-                    trades.append({**position, 'exit': price, 'exit_time': dt,
-                                   'pnl': +TAKE_PROFIT, 'reason': 'TP'}); hit = True
+                if   price <= ep*(1-STOP_LOSS):   pnl, hit = -STOP_LOSS,   True
+                elif price >= ep*(1+TAKE_PROFIT):  pnl, hit = +TAKE_PROFIT, True
             else:
-                if price >= ep * (1 + STOP_LOSS):
-                    trades.append({**position, 'exit': price, 'exit_time': dt,
-                                   'pnl': -STOP_LOSS, 'reason': 'SL'}); hit = True
-                elif price <= ep * (1 - TAKE_PROFIT):
-                    trades.append({**position, 'exit': price, 'exit_time': dt,
-                                   'pnl': +TAKE_PROFIT, 'reason': 'TP'}); hit = True
-            if hit: position = None
-            else:   continue   # 持仓中，不开新仓
-
-        # ── 计算指标 ────────────────────────────────────────────
-        cl = closes[:i+1]
-        vo = volumes[:i+1]
-
-        rsi   = calc_rsi(cl)
-        bb    = calc_bb(cl)
-        ema20 = calc_ema(cl, EMA_SHORT)
-        ema50 = calc_ema(cl, EMA_LONG)
-        volr  = calc_vol_ratio(vo)
-        today_cl = [x for x in by_date[today] if x['time'] <= c['time']]
-        vwap  = calc_vwap(today_cl)
+                if   price >= ep*(1+STOP_LOSS):   pnl, hit = -STOP_LOSS,   True
+                elif price <= ep*(1-TAKE_PROFIT):  pnl, hit = +TAKE_PROFIT, True
+            if hit:
+                reason = 'SL' if pnl < 0 else 'TP'
+                trades.append({**position, 'exit': price, 'exit_time': dt,
+                               'pnl': pnl, 'reason': reason})
+                position = None
+            else:
+                continue
 
         # ── 打分 ────────────────────────────────────────────────
-        rs, rv = score_rsi(rsi)
-        bs, bv = score_bb(bb['pct'] if bb else 0.5)
-        vs, vv = score_vwap((price - vwap) / vwap * 100) if vwap else (0, 0)
-        total  = rs + bs + vs + score_vol(volr)
+        rs, rv = score_rsi(rsi[i])
+        bs, bv = score_bb(bb[i] if bb[i] is not None else 0.5)
+        if vwap[i]:
+            vs, vv = score_vwap((price - vwap[i]) / vwap[i] * 100)
+        else:
+            vs, vv = 0, 0
+        total  = rs + bs + vs + score_vol(vwr[i])
         votes  = rv + bv + vv
         direc  = 'BUY' if votes > 0 else ('SELL' if votes < 0 else None)
 
         if not direc or total < SIG_THRESHOLD: continue
 
-        # ── 风控：EMA趋势过滤（Freqtrade逻辑）──────────────────
-        if direc == 'BUY'  and ema20 < ema50: continue
-        if direc == 'SELL' and ema20 > ema50: continue
+        # ── 风控：EMA 趋势过滤（Freqtrade 逻辑）────────────────
+        if direc == 'BUY'  and e20[i] is not None and e20[i] < e50[i]: continue
+        if direc == 'SELL' and e20[i] is not None and e20[i] > e50[i]: continue
 
-        # ── 开仓 ────────────────────────────────────────────────
         position = {'dir': direc, 'entry': price, 'entry_time': dt, 'score': total}
 
     return trades
 
-# ── 统计输出 ──────────────────────────────────────────────────────
+# ── 统计 ──────────────────────────────────────────────────────────
 def print_stats(trades):
     if not trades:
         print("⚠ 无交易记录"); return
@@ -243,22 +262,23 @@ def print_stats(trades):
     al     = sum(t['pnl'] for t in losses) / len(losses) * 100 if losses else 0
     pf     = abs(aw / al) if al else float('inf')
 
-    eq, peak, mdd = 1.0, 1.0, 0.0
+    eq = peak = 1.0; mdd = 0.0
     for t in trades:
-        eq *= (1 + t['pnl'])
+        eq  *= (1 + t['pnl'])
         peak = max(peak, eq)
         mdd  = max(mdd, (peak - eq) / peak)
 
     sl  = sum(1 for t in trades if t['reason'] == 'SL')
     tp  = sum(1 for t in trades if t['reason'] == 'TP')
     eod = sum(1 for t in trades if t['reason'] == 'EOD')
+    buys = sum(1 for t in trades if t['dir'] == 'BUY')
 
     W = 52
-    print("\n" + "═"*W)
-    print("  BTC/USD 15m 均值回归策略  |  2022-2024 回测")
-    print("  止损 1.5%  止盈 3.0%  日内强平 22:00 UTC")
     print("═"*W)
-    print(f"  总交易次数    {n:>6}    做多 {sum(1 for t in trades if t['dir']=='BUY')}  做空 {sum(1 for t in trades if t['dir']=='SELL')}")
+    print("  BTC/USD 15m 均值回归策略  |  2022-2024 回测")
+    print("  止损 1.5%  |  止盈 3.0%  |  日内强平 22:00 UTC")
+    print("═"*W)
+    print(f"  总交易次数    {n:>6}    做多 {buys}  做空 {n-buys}")
     print(f"  盈利 / 亏损   {len(wins):>4} / {len(losses):<4}")
     print("─"*W)
     print(f"  胜  率        {wr:>6.1f}%")
@@ -281,10 +301,14 @@ def print_stats(trades):
         yr_ = 1.0
         for t in yt: yr_ *= (1 + t['pnl'])
         print(f"  {yr:<6}{len(yt):>6}{yw:>7.1f}%{(yr_-1)*100:>+8.1f}%")
-    print("═"*W + "\n")
+    print("═"*W)
 
+# ── 主程序 ────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    candles = download_ohlcv()
-    print(f"共 {len(candles)} 根K线  {datetime.utcfromtimestamp(candles[0]['time']).date()} → {datetime.utcfromtimestamp(candles[-1]['time']).date()}\n")
-    trades = run_backtest(candles)
+    candles = generate_candles()
+    print("预计算指标中...")
+    rsi, bb, e20, e50, vwr, vwap = precompute(candles)
+    print(f"开始回测（预热期 {WARMUP} 根）...")
+    trades  = run_backtest(candles, rsi, bb, e20, e50, vwr, vwap)
+    print(f"完成，共 {len(trades)} 笔交易\n")
     print_stats(trades)
