@@ -30,7 +30,7 @@ EOD_HOUR_UTC  = 22
 INTERVAL_SEC  = 900    # 15分钟
 
 # ── OKX 真实数据拉取 ──────────────────────────────────────────────
-def fetch_okx_candles(inst_id='BTC-USDT', bar='15m', limit=300):
+def fetch_okx_candles(inst_id="BTC-USDT", bar="15m", limit=1500):
     url = (f"https://www.okx.com/api/v5/market/history-candles"
            f"?instId={inst_id}&bar={bar}&limit={limit}")
     ctx = ssl.create_default_context()
@@ -374,7 +374,7 @@ def print_stats(trades):
 if __name__ == '__main__':
     try:
         print("正在从 OKX 拉取真实K线数据...")
-        candles = fetch_okx_candles(limit=300)
+        candles = fetch_okx_candles(limit=1500)
     except Exception as e:
         print(f"OKX 获取失败（{e}），切换为模拟数据...\n")
         candles = generate_candles()
