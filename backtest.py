@@ -29,22 +29,41 @@ EOD_HOUR_UTC  = 22
 
 INTERVAL_SEC  = 900    # 15分钟
 
-# ── OKX 真实数据拉取 ──────────────────────────────────────────────
+# ── OKX 真实数据拉取（分批，每批≤300根）────────────────────────────
 def fetch_okx_candles(inst_id="BTC-USDT", bar="15m", limit=1500):
-    url = (f"https://www.okx.com/api/v5/market/history-candles"
-           f"?instId={inst_id}&bar={bar}&limit={limit}")
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode    = ssl.CERT_NONE
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-        data = json.loads(resp.read())
-    if data.get('code') != '0':
-        raise RuntimeError(f"OKX API error: {data.get('msg')}")
-    rows = data['data']
-    rows.reverse()   # OKX 返回最新在前，翻转为时间正序
+
+    def _fetch(before_ms=None):
+        base = "https://www.okx.com/api/v5/market/history-candles"
+        qs   = f"?instId={inst_id}&bar={bar}&limit=300"
+        if before_ms:
+            qs += f"&before={before_ms}"
+        req = urllib.request.Request(base + qs, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+            data = json.loads(resp.read())
+        if data.get('code') != '0':
+            raise RuntimeError(f"OKX API error: {data.get('msg')}")
+        return data['data']   # 最新在前
+
+    all_rows = []
+    before_ms = None
+    while len(all_rows) < limit:
+        batch = _fetch(before_ms)
+        if not batch:
+            break
+        all_rows.extend(batch)
+        before_ms = int(batch[-1][0])   # 最旧一根的时间戳，下批拉更早的
+        print(f"  已拉取 {len(all_rows)} 根...", end='\r')
+        if len(batch) < 300:            # OKX 没有更早数据了
+            break
+
+    all_rows = all_rows[:limit]
+    all_rows.reverse()   # 翻转为时间正序（最旧在前）
+
     candles = []
-    for row in rows:
+    for row in all_rows:
         candles.append({
             'time':   int(row[0]) // 1000,
             'open':   float(row[1]),
@@ -55,7 +74,7 @@ def fetch_okx_candles(inst_id="BTC-USDT", bar="15m", limit=1500):
         })
     t0 = datetime.utcfromtimestamp(candles[0]['time']).strftime('%Y-%m-%d %H:%M')
     t1 = datetime.utcfromtimestamp(candles[-1]['time']).strftime('%Y-%m-%d %H:%M')
-    print(f"OKX真实K线: {len(candles)} 根  {t0} → {t1} (UTC)")
+    print(f"OKX真实K线: {len(candles)} 根  {t0} → {t1} (UTC)        ")
     return candles
 
 # ── 模拟数据生成 ──────────────────────────────────────────────────
