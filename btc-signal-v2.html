@@ -41,6 +41,13 @@
     .sig-direction.buy     { color: var(--green);  }
     .sig-direction.sell    { color: var(--red);    }
     .sig-direction.blocked { color: var(--orange); }
+    .entry-table { display:grid; grid-template-columns:1fr 1fr; gap:10px 24px; margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+    .entry-label { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.6px; margin-bottom:2px; }
+    .entry-val   { font-size:16px; font-weight:700; }
+    .entry-val.tp  { color:var(--green); }
+    .entry-val.sl  { color:var(--red);   }
+    .entry-val.rr  { color:#7986ff; }
+    .entry-val.wr  { color:var(--orange); }
     .sig-meta { font-size: 13px; line-height: 2.1; font-family: monospace; }
 
     /* 控制行 */
@@ -97,6 +104,7 @@
     <div class="card-title">信号结论</div>
     <div class="sig-direction" id="sig-dir">--</div>
     <div class="sig-meta" id="sig-meta"></div>
+    <div class="entry-table" id="entry-table" style="display:none"></div>
   </div>
 
   <!-- 指标 + 历史 两列 -->
@@ -135,7 +143,8 @@ const CONFIG = {
   VOL_PERIOD:   20,   // 成交量均值周期
   INTERVAL_15M: 15,
   SIG_THRESHOLD: 70,  // 70分以上才出信号
-  STOP_LOSS_PCT: 0.015, // 止损 1.5%
+  STOP_LOSS_PCT:    0.015, // 止损 1.5%
+  TAKE_PROFIT_PCT:  0.020, // 目标 2.0%
 };
 
 // 消息面开关状态
@@ -479,22 +488,42 @@ function renderSignalBox(sig) {
     dir.textContent = blocked ? '信号已拦截' : '等待信号';
     meta.innerHTML = `<span class="warn">${reason}</span>\n`
       + `当前评分：<span class="num">${sig.score}/100</span>  方向倾向：${sig.direction}`;
+    document.getElementById('entry-table').style.display = 'none';
     return;
   }
 
   // 正式信号
   box.className = sig.direction === 'BUY' ? 'buy' : 'sell';
   dir.className = `sig-direction ${sig.direction === 'BUY' ? 'buy' : 'sell'}`;
-  dir.textContent = sig.direction === 'BUY' ? '▲ 做多信号' : '▼ 做空信号';
+  dir.textContent = sig.direction === 'BUY' ? '▲ BUY' : '▼ SELL';
 
-  const stopPrice = sig.direction === 'BUY' ? sig.stopLong : sig.stopShort;
-  const stopDir   = sig.direction === 'BUY' ? '下方止损' : '上方止损';
+  const isBuy     = sig.direction === 'BUY';
+  const entryP    = sig.raw.last;
+  const stopPrice = isBuy ? sig.stopLong  : sig.stopShort;
+  const tpPrice   = isBuy
+    ? (entryP * (1 + CONFIG.TAKE_PROFIT_PCT)).toFixed(2)
+    : (entryP * (1 - CONFIG.TAKE_PROFIT_PCT)).toFixed(2);
+  const rrRatio   = (CONFIG.TAKE_PROFIT_PCT / CONFIG.STOP_LOSS_PCT).toFixed(2);
+  const fmt       = v => Number(v).toLocaleString('en-US', {minimumFractionDigits:2});
+
+  // 历史胜率：统计 localStorage 中同方向信号数
+  const hist      = loadHistory();
+  const sameDir   = hist.filter(h => h.direction === sig.direction).length;
+  const totalSig  = hist.length;
+  const wrText    = totalSig > 0 ? `本地 ${sameDir}/${totalSig} 次同向` : '暂无历史数据';
 
   meta.innerHTML =
-    `评分：<span class="num">${sig.score}/100</span>  强度：<span class="${sig.score >= 85 ? 'ok' : 'warn'}">${sig.strength}</span>\n`
-  + `入场价：<span class="num">$${sig.raw.last.toLocaleString('en-US', {minimumFractionDigits:2})}</span>\n`
-  + `止损价：<span class="err">$${stopPrice}</span>  （${stopDir} 1.5%）\n`
-  + `风控：<span class="ok">✓ ${sig.risk.reason}</span>`;
+    `评分：<span class="num">${sig.score}/100</span>  强度：<span class="${sig.score >= 85 ? 'ok' : 'warn'}">${sig.strength}</span>  `
+  + `风控：<span class="ok">✓ 通过</span>`;
+
+  const et = document.getElementById('entry-table');
+  et.style.display = 'grid';
+  et.innerHTML =
+    `<div><div class="entry-label">进场价</div><div class="entry-val">$${fmt(entryP)}</div></div>`
+  + `<div><div class="entry-label">目标价 +${(CONFIG.TAKE_PROFIT_PCT*100).toFixed(0)}%</div><div class="entry-val tp">$${fmt(tpPrice)}</div></div>`
+  + `<div><div class="entry-label">止损价 -${(CONFIG.STOP_LOSS_PCT*100).toFixed(1)}%</div><div class="entry-val sl">$${fmt(stopPrice)}</div></div>`
+  + `<div><div class="entry-label">盈亏比</div><div class="entry-val rr">${rrRatio}:1</div></div>`
+  + `<div style="grid-column:1/-1"><div class="entry-label">历史信号</div><div class="entry-val wr">${wrText}</div></div>`;
 }
 
 /* ================================================================
