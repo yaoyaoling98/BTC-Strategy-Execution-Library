@@ -117,10 +117,10 @@
       <div class="card-title">📋 信号触发历史 <button class="btn-clear" onclick="clearHistory()" style="margin-left:10px">清空</button></div>
       <table class="sig-table">
         <thead>
-          <tr><th>时间</th><th>方向</th><th>强度</th><th>评分</th><th>入场价</th><th>止损价</th><th>RSI</th><th>BB%</th><th>EMA</th></tr>
+          <tr><th>时间</th><th>方向</th><th>强度</th><th>评分</th><th>入场价</th><th>止损价</th><th>结果</th><th>RSI</th><th>BB%</th><th>EMA</th></tr>
         </thead>
         <tbody id="history-body">
-          <tr><td colspan="9" style="color:#8b949e;text-align:center;padding:20px">暂无记录</td></tr>
+          <tr><td colspan="10" style="color:#8b949e;text-align:center;padding:20px">暂无记录</td></tr>
         </tbody>
       </table>
     </div>
@@ -467,9 +467,11 @@ function logSignal(sig, candles) {
     score:     sig.score,
     price:     price.toFixed(2),
     stop:      stopPrice,
+    bbTarget:  bb ? parseFloat(bb.middle.toFixed(2)) : null,  // 快照，入库后不再更新
     rsi:       rsi ? rsi.toFixed(1) : '--',
     bbPct:     bb  ? (bb.pct * 100).toFixed(1) + '%' : '--',
     emaTrend:  ema20 > ema50 ? '多头' : '空头',
+    outcome:   null,   // WIN / LOSS / EOD，由 updateOpenSignals 填充
   });
 
   saveHistory(history);
@@ -485,6 +487,12 @@ function renderHistory() {
   }
 
   // 倒序显示，最新在最上
+  const outcomeHtml = o =>
+    o === 'WIN'  ? `<span style="color:#26a69a;font-weight:700">✓ WIN</span>` :
+    o === 'LOSS' ? `<span style="color:#ef5350;font-weight:700">✗ LOSS</span>` :
+    o === 'EOD'  ? `<span style="color:#f7931a">⏸ EOD</span>` :
+                   `<span style="color:#4a4f5e">持仓中…</span>`;
+
   tbody.innerHTML = history.slice().reverse().map(h => `
     <tr>
       <td style="color:#787b86">${h.time}</td>
@@ -493,11 +501,35 @@ function renderHistory() {
       <td style="color:#7986ff;font-weight:600">${h.score}</td>
       <td>$${Number(h.price).toLocaleString('en-US', {minimumFractionDigits:2})}</td>
       <td style="color:#ef5350">$${Number(h.stop).toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+      <td>${outcomeHtml(h.outcome)}</td>
       <td style="color:#d1d4dc">${h.rsi}</td>
       <td style="color:#d1d4dc">${h.bbPct}</td>
       <td style="color:${h.emaTrend==='多头'?'#26a69a':'#ef5350'}">${h.emaTrend}</td>
     </tr>
   `).join('');
+}
+
+/* ================================================================
+   updateOpenSignals — 每次刷新时扫描未结算信号，判定 WIN / LOSS
+   TP 判定必须用 h.bbTarget（入库时快照），不重算当前中轨
+   ================================================================ */
+function updateOpenSignals(currentPrice) {
+  const history = loadHistory();
+  let changed = false;
+  for (const h of history) {
+    if (h.outcome) continue;                    // 已结算跳过
+    const sl = parseFloat(h.stop);
+    const tp = h.bbTarget != null ? parseFloat(h.bbTarget) : null;
+    if (tp == null) continue;                   // 旧记录无快照，跳过
+    if (h.direction === 'BUY') {
+      if (currentPrice <= sl)   { h.outcome = 'LOSS'; changed = true; }
+      else if (currentPrice >= tp) { h.outcome = 'WIN';  changed = true; }
+    } else {
+      if (currentPrice >= sl)   { h.outcome = 'LOSS'; changed = true; }
+      else if (currentPrice <= tp) { h.outcome = 'WIN';  changed = true; }
+    }
+  }
+  if (changed) saveHistory(history);
 }
 
 function clearHistory() {
@@ -557,11 +589,14 @@ function renderSignalBox(sig) {
   const rrRatio   = (CONFIG.TAKE_PROFIT_PCT / CONFIG.STOP_LOSS_PCT).toFixed(2);
   const fmt       = v => Number(v).toLocaleString('en-US', {minimumFractionDigits:2});
 
-  // 历史胜率：统计 localStorage 中同方向信号数
+  // 历史胜率：基于 updateOpenSignals 已结算的信号
   const hist      = loadHistory();
-  const sameDir   = hist.filter(h => h.direction === sig.direction).length;
-  const totalSig  = hist.length;
-  const wrText    = totalSig > 0 ? `本地 ${sameDir}/${totalSig} 次同向` : '暂无历史数据';
+  const resolved  = hist.filter(h => h.outcome === 'WIN' || h.outcome === 'LOSS');
+  const wins      = resolved.filter(h => h.outcome === 'WIN').length;
+  const wrText    = resolved.length >= 3
+    ? `胜率 ${(wins / resolved.length * 100).toFixed(0)}%（${wins}/${resolved.length} 已结算）`
+    : resolved.length > 0 ? `${wins}/${resolved.length} 已结算（样本不足）`
+    : '暂无结算记录';
 
   meta.innerHTML =
     `评分：<span class="num">${sig.score}/100</span>  强度：<span class="${sig.score >= 85 ? 'ok' : 'warn'}">${sig.strength}</span>  `
@@ -608,7 +643,8 @@ async function run() {
       chgEl.style.background = chg24h >= 0 ? '#26a69a' : '#ef5350';
     }
 
-    // ── 生成信号 ────────────────────────────────────────────────
+    // ── 更新未结算信号 + 生成新信号 ─────────────────────────────
+    updateOpenSignals(last);
     const sig = generateSignal(closes, candles, volumes);
     renderSignalBox(sig);
     logSignal(sig, candles);
