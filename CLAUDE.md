@@ -66,12 +66,12 @@ BTC/USD 均值回归信号系统，接入 Kraken 公开 API，纯前端单文件
 ## 文件结构
 
 ```
-btc-signal-v2.html        # ★ 正式版 — 唯一维护对象（赛博朋克UI + 完整信号引擎）
+btc-signal-v2.html        # ★ 正式版 — 唯一维护对象
 backfill.html             # 冷启动工具 — 回填90天历史信号到localStorage
 backtest.py               # 策略回测脚本 — OKX数据，MA200牛熊过滤
-btc-signal.html           # 历史测试版，勿删勿改
+README.md                 # 项目说明
+CLAUDE.md                 # 本文件（AI 开发指引）
 archive/                  # 归档目录（已废弃文件，勿引用）
-CLAUDE.md                 # 本文件
 ```
 
-> **btc-monitor.html 已废弃**，已归档至 archive/。所有功能均已整合进 btc-signal-v2.html。
+> 根目录不得出现其他 .html 文件。新增功能在 btc-signal-v2.html 内扩展，不新建文件。
