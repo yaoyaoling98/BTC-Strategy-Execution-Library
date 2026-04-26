@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BTC 实时监控面板</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #07070f;
+            color: #c8c8d8;
+            font-family: 'Courier New', 'Consolas', monospace;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ── Scan-line overlay ─────────────────────────── */
+        .scanline {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 3px;
+            background: linear-gradient(transparent, rgba(247,147,26,.06), transparent);
+            animation: scanMove 10s linear infinite;
+            pointer-events: none; z-index: 9999;
+        }
+        @keyframes scanMove { 0%{top:-3px} 100%{top:100vh} }
+
+        /* ── Header ────────────────────────────────────── */
+        header {
+            background: #0b0b18;
+            border-bottom: 1px solid #1c1c30;
+            padding: 0 28px;
+            height: 54px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: 3px;
+            color: #f7931a;
+        }
+        .logo span { color: #e8e8f0; }
+
+        /* News-mode toggle group */
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .toggle-label {
+            font-size: 12px;
+            color: #666;
+            letter-spacing: 1.5px;
+        }
+        .switch {
+            position: relative;
+            width: 50px; height: 24px;
+            cursor: pointer;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .knob {
+            position: absolute;
+            inset: 0;
+            background: #1e1e30;
+            border: 1px solid #333;
+            border-radius: 24px;
+            transition: .3s;
+        }
+        .knob::before {
+            content: '';
+            position: absolute;
+            width: 16px; height: 16px;
+            left: 3px; top: 3px;
+            background: #555;
+            border-radius: 50%;
+            transition: .3s;
+        }
+        .switch input:checked ~ .knob {
+            background: #c0440a;
+            border-color: #e05010;
+        }
+        .switch input:checked ~ .knob::before {
+            transform: translateX(26px);
+            background: #fff;
+        }
+        #modeTag {
+            font-size: 12px;
+            color: #555;
+            letter-spacing: 1px;
+            min-width: 28px;
+        }
+
+        /* ── Status bar ────────────────────────────────── */
+        .statusbar {
+            background: #090915;
+            border-bottom: 1px solid #15151f;
+            padding: 5px 28px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 11.5px;
+            color: #444;
+        }
+        .dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: #00e07a;
+            flex-shrink: 0;
+            animation: pulse 2.5s infinite;
+        }
+        .dot.err { background: #ff4040; animation: none; }
+        .dot.loading { background: #f7931a; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+        #nextRefresh { margin-left: auto; }
+        #lastUpdate { color: #3a3a50; }
+
+        /* ── News-mode banner ──────────────────────────── */
+        #newsBanner {
+            display: none;
+            background: linear-gradient(90deg, #160800, #2a1000, #160800);
+            border-bottom: 1px solid rgba(224,80,16,.35);
+            padding: 9px 28px;
+            text-align: center;
+            font-size: 13px;
+            letter-spacing: 2px;
+            color: #e05010;
+        }
+
+        /* ── Main layout ───────────────────────────────── */
+        main {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 22px 24px 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* ── Card base ─────────────────────────────────── */
+        .card {
+            background: #0c0c1a;
+            border: 1px solid #181828;
+            border-radius: 8px;
+            padding: 26px 28px;
+            position: relative;
+            overflow: hidden;
+        }
+        .card::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg,
+                transparent, rgba(247,147,26,.25), transparent);
+        }
+
+        /* ── Price card ────────────────────────────────── */
+        #priceCard { text-align: center; }
+        .pair { font-size: 12px; color: #454558; letter-spacing: 3px; margin-bottom: 10px; }
+
+        #priceDisplay {
+            font-size: 76px;
+            font-weight: 700;
+            letter-spacing: -2px;
+            line-height: 1;
+            color: #e8e8f8;
+            transition: color .5s;
+        }
+        #priceDisplay.up   { color: #00e07a; }
+        #priceDisplay.down { color: #ff4444; }
+
+        .price-meta {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 0 36px;
+            margin-top: 18px;
+        }
+        .meta-item { text-align: center; min-width: 90px; }
+        .meta-label {
+            font-size: 10px; color: #3a3a58; letter-spacing: 1.5px;
+            margin-bottom: 4px;
+        }
+        .meta-val { font-size: 18px; font-weight: 700; }
+        .pos { color: #00e07a; }
+        .neg { color: #ff4444; }
+        .neu { color: #888; }
+
+        /* ── Signal card ───────────────────────────────── */
+        #signalCard {
+            text-align: center;
+            transition: background .5s, border-color .5s, box-shadow .5s;
+        }
+        #signalCard.s-neutral { border-color:#181828; }
+        #signalCard.s-warning {
+            border-color:#d4900a;
+            background:#120e00;
+            box-shadow: 0 0 28px rgba(212,144,10,.18);
+        }
+        #signalCard.s-long {
+            border-color:#00c860;
+            background:#001a0e;
+            box-shadow: 0 0 38px rgba(0,200,96,.25);
+        }
+        #signalCard.s-short {
+            border-color:#e03030;
+            background:#1a0000;
+            box-shadow: 0 0 38px rgba(224,48,48,.25);
+        }
+        #signalCard.s-paused {
+            border-color:#333;
+            background:#0d0d18;
+        }
+
+        .sig-label {
+            font-size: 11px; color: #444; letter-spacing: 2.5px; margin-bottom: 12px;
+        }
+        #sigText {
+            font-size: 40px;
+            font-weight: 700;
+            letter-spacing: 5px;
+            line-height: 1;
+            transition: color .4s;
+        }
+        .st-neutral { color: #404060; }
+        .st-warning  { color: #d4900a; }
+        .st-long     { color: #00e07a; }
+        .st-short    { color: #e03030; }
+        .st-paused   { color: #444; }
+
+        #sigDesc { font-size: 13px; color: #505070; margin-top: 10px; }
+
+        @keyframes flashSig {
+            0%,100%{opacity:1} 20%,60%{opacity:.2}
+        }
+        .flash { animation: flashSig .55s ease; }
+
+        /* ── Stats row ─────────────────────────────────── */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+        }
+        @media(max-width:700px){
+            .stats-grid { grid-template-columns: repeat(2,1fr); }
+            #priceDisplay { font-size: 46px; }
+        }
+        .stat-card .card-label {
+            font-size: 10.5px; color: #3a3a58; letter-spacing: 1.5px; margin-bottom: 6px;
+        }
+        .stat-card .card-val { font-size: 20px; font-weight: 700; color: #c8c8e0; }
+
+        /* ── History card ──────────────────────────────── */
+        .hist-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #141420;
+        }
+        .hist-title { font-size: 12px; color: #555; letter-spacing: 2.5px; }
+        #histCount  { font-size: 11px; color: #333; }
+
+        .hist-cols {
+            display: grid;
+            grid-template-columns: 148px 1fr 1fr 100px;
+            gap: 10px;
+            padding-bottom: 7px;
+            border-bottom: 1px solid #131320;
+            margin-bottom: 2px;
+        }
+        .hist-col-label { font-size: 10px; color: #363650; letter-spacing: 1px; }
+
+        #histList { min-height: 40px; }
+
+        .hist-row {
+            display: grid;
+            grid-template-columns: 148px 1fr 1fr 100px;
+            gap: 10px;
+            padding: 9px 0;
+            border-bottom: 1px solid #0f0f1a;
+            align-items: center;
+            font-size: 13px;
+            animation: rowIn .4s ease;
+        }
+        @keyframes rowIn {
+            from{opacity:0; transform:translateY(-8px)}
+            to  {opacity:1; transform:translateY(0)}
+        }
+        .hist-row:last-child { border-bottom: none; }
+        .hist-time { color: #424260; font-size: 11.5px; }
+        .hist-price { font-weight: 700; color: #d0d0e8; }
+
+        .badge {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            padding: 3px 10px;
+            border-radius: 4px;
+        }
+        .b-warn  { background:rgba(212,144,10,.12); color:#d4900a; border:1px solid rgba(212,144,10,.3); }
+        .b-long  { background:rgba(0,200,96,.10);   color:#00c860; border:1px solid rgba(0,200,96,.3); }
+        .b-short { background:rgba(224,48,48,.10);  color:#e03030; border:1px solid rgba(224,48,48,.3); }
+
+        .empty-hist {
+            text-align: center; color: #282838;
+            padding: 28px; font-size: 13px; letter-spacing: 1px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="scanline"></div>
+
+<!-- ── Header ──────────────────────────────────────────── -->
+<header>
+    <div class="logo">₿TC <span>MONITOR</span></div>
+    <div class="toggle-group">
+        <span class="toggle-label">消息面模式</span>
+        <label class="switch">
+            <input type="checkbox" id="newsToggle" onchange="onNewsToggle()">
+            <span class="knob"></span>
+        </label>
+        <span id="modeTag">OFF</span>
+    </div>
+</header>
+
+<!-- ── Status bar ──────────────────────────────────────── -->
+<div class="statusbar">
+    <div class="dot" id="dot"></div>
+    <span id="connText">连接中…</span>
+    <span id="nextRefresh">下次刷新: --s</span>
+    <span>|</span>
+    <span id="lastUpdate">--</span>
+</div>
+
+<!-- ── News-mode banner ─────────────────────────────────── -->
+<div id="newsBanner">
+    ⚠ &nbsp;消息面模式已启用 &mdash; 信号已屏蔽，请根据消息面自行判断市场方向&nbsp; ⚠
+</div>
+
+<!-- ── Main ────────────────────────────────────────────── -->
+<main>
+
+    <!-- Price card -->
+    <div class="card" id="priceCard">
+        <div class="pair">XBT / USD &nbsp;·&nbsp; KRAKEN &nbsp;·&nbsp; 实时行情</div>
+        <div id="priceDisplay">$--,---</div>
+        <div class="price-meta">
+            <div class="meta-item">
+                <div class="meta-label">24H 涨跌幅</div>
+                <div class="meta-val neu" id="changePct">--%</div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label">24H 最高</div>
+                <div class="meta-val pos" id="high24">--</div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label">24H 最低</div>
+                <div class="meta-val neg" id="low24">--</div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label">开盘价</div>
+                <div class="meta-val neu" id="open24">--</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signal card -->
+    <div class="card s-neutral" id="signalCard">
+        <div class="sig-label">SIGNAL STATUS</div>
+        <div id="sigText" class="st-neutral">— &nbsp;待&nbsp;机&nbsp;中&nbsp; —</div>
+        <div id="sigDesc">等待首次数据…</div>
+    </div>
+
+    <!-- Stats row -->
+    <div class="stats-grid">
+        <div class="card stat-card">
+            <div class="card-label">24H 成交量 (BTC)</div>
+            <div class="card-val" id="vol24">--</div>
+        </div>
+        <div class="card stat-card">
+            <div class="card-label">24H 均价 (VWAP)</div>
+            <div class="card-val" id="vwap24">--</div>
+        </div>
+        <div class="card stat-card">
+            <div class="card-label">24H 成交笔数</div>
+            <div class="card-val" id="trades24">--</div>
+        </div>
+        <div class="card stat-card">
+            <div class="card-label">买一 / 卖一</div>
+            <div class="card-val" id="bidask" style="font-size:16px">-- / --</div>
+        </div>
+    </div>
+
+    <!-- Trigger history -->
+    <div class="card">
+        <div class="hist-head">
+            <span class="hist-title">触发记录</span>
+            <span id="histCount">共 0 条</span>
+        </div>
+        <div class="hist-cols">
+            <span class="hist-col-label">触发时间</span>
+            <span class="hist-col-label">价格 (USD)</span>
+            <span class="hist-col-label">24H 涨跌幅</span>
+            <span class="hist-col-label">信号类型</span>
+        </div>
+        <div id="histList"><div class="empty-hist">暂无触发记录</div></div>
+    </div>
+
+</main>
+
+<!-- ── Script ───────────────────────────────────────────── -->
+<script>
+'use strict';
+
+const API   = 'https://api.kraken.com/0/public/Ticker?pair=XBTUSD';
+const TICK  = 30;   // seconds between fetches
+
+let newsMode      = false;
+let countdown     = TICK;
+let lastSigLevel  = 'neutral';
+let history       = [];         // max 10 entries
+let tickTimer     = null;
+
+// ── helpers ────────────────────────────────────────────
+
+function fmtUSD(n) {
+    return '$' + parseFloat(n).toLocaleString('en-US',
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtVol(v) {
+    v = parseFloat(v);
+    return v >= 1e4 ? (v/1e3).toFixed(1)+'K' : v.toFixed(2);
+}
+function fmtTrades(n) {
+    n = parseInt(n);
+    if (n >= 1e6) return (n/1e6).toFixed(2)+'M';
+    if (n >= 1e4) return (n/1e3).toFixed(1)+'K';
+    return n.toLocaleString();
+}
+function nowStr() {
+    return new Date().toLocaleString('zh-CN', {
+        month:'2-digit', day:'2-digit',
+        hour:'2-digit', minute:'2-digit', second:'2-digit',
+        hour12: false
+    }).replace(/\//g,'/');
+}
+
+// ── News-mode toggle ───────────────────────────────────
+
+function onNewsToggle() {
+    newsMode = document.getElementById('newsToggle').checked;
+    document.getElementById('modeTag').textContent     = newsMode ? 'ON' : 'OFF';
+    document.getElementById('newsBanner').style.display = newsMode ? 'block' : 'none';
+
+    if (newsMode) {
+        applySignalUI('paused', '⏸ &nbsp;消息面模式', '信号已屏蔽 — 高波动期间请勿依赖技术信号');
+    } else {
+        // Re-render last known signal by re-fetching
+        fetchTicker();
+    }
+}
+
+// ── Signal logic ───────────────────────────────────────
+
+/**
+ * Returns 'long' | 'short' | 'warning' | 'neutral'
+ */
+function classify(pct) {
+    const a = Math.abs(pct);
+    if (a >= 10) return pct > 0 ? 'long' : 'short';
+    if (a >= 5)  return 'warning';
+    return 'neutral';
+}
+
+function applySignalUI(level, textHTML, desc) {
+    const card = document.getElementById('signalCard');
+    const txt  = document.getElementById('sigText');
+    const dsc  = document.getElementById('sigDesc');
+
+    // Card class
+    card.className = 'card s-' + level;
+
+    // Text colour
+    txt.className = 'st-' + level;
+    txt.innerHTML = textHTML;
+
+    dsc.textContent = desc;
+}
+
+function updateSignal(pct, price) {
+    if (newsMode) {
+        applySignalUI('paused', '⏸ &nbsp;消息面模式', '信号已屏蔽 — 高波动期间请勿依赖技术信号');
+        return;
+    }
+
+    const level = classify(pct);
+    const abs   = Math.abs(pct).toFixed(2);
+    const dir   = pct >= 0 ? '+' : '-';
+
+    let textHTML, desc;
+
+    if (level === 'long') {
+        textHTML = '▲ &nbsp;做多信号';
+        desc     = `24H 涨幅 +${abs}% 突破 +10% 阈值 — 趋势偏多，关注做多机会`;
+    } else if (level === 'short') {
+        textHTML = '▼ &nbsp;做空信号';
+        desc     = `24H 跌幅 -${abs}% 突破 -10% 阈值 — 趋势偏空，关注做空机会`;
+    } else if (level === 'warning') {
+        textHTML = '⚡ &nbsp;警 &nbsp; 戒';
+        desc     = `24H 变动 ${dir}${abs}% 进入 ±5% 预警区间 — 保持关注，警惕突破`;
+    } else {
+        textHTML = '— &nbsp;观 &nbsp; 望 &nbsp;—';
+        desc     = `24H 变动 ${dir}${abs}% 未达信号阈值 — 市场平稳，继续观察`;
+    }
+
+    applySignalUI(level, textHTML, desc);
+
+    // Flash animation on strong signals
+    if (level === 'long' || level === 'short') {
+        const t = document.getElementById('sigText');
+        t.classList.remove('flash');
+        void t.offsetWidth;             // reflow
+        t.classList.add('flash');
+    }
+
+    // Record to history when signal level escalates (not on every tick)
+    if (level !== 'neutral' && level !== lastSigLevel) {
+        pushHistory(price, pct, level);
+    }
+
+    lastSigLevel = level;
+}
+
+// ── History ────────────────────────────────────────────
+
+function pushHistory(price, pct, level) {
+    history.unshift({ time: nowStr(), price, pct, level });
+    if (history.length > 10) history.length = 10;
+    renderHistory();
+}
+
+function renderHistory() {
+    const list  = document.getElementById('histList');
+    const count = document.getElementById('histCount');
+    count.textContent = `共 ${history.length} 条`;
+
+    if (!history.length) {
+        list.innerHTML = '<div class="empty-hist">暂无触发记录</div>';
+        return;
+    }
+
+    list.innerHTML = history.map(h => {
+        const sign  = h.pct >= 0 ? '+' : '';
+        const cls   = h.pct >= 0 ? 'pos' : 'neg';
+        let badge, label;
+        if (h.level === 'long')    { badge = 'b-long';  label = '▲ 做多'; }
+        else if (h.level === 'short') { badge = 'b-short'; label = '▼ 做空'; }
+        else                       { badge = 'b-warn';  label = '⚡ 警戒'; }
+
+        return `
+          <div class="hist-row">
+            <span class="hist-time">${h.time}</span>
+            <span class="hist-price">${fmtUSD(h.price)}</span>
+            <span class="${cls}" style="font-weight:700">${sign}${h.pct.toFixed(2)}%</span>
+            <span><span class="badge ${badge}">${label}</span></span>
+          </div>`;
+    }).join('');
+}
+
+// ── Fetch ──────────────────────────────────────────────
+
+async function fetchTicker() {
+    const dot  = document.getElementById('dot');
+    const conn = document.getElementById('connText');
+
+    dot.className  = 'dot loading';
+    conn.textContent = '请求中…';
+
+    try {
+        const res  = await fetch(API);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+
+        if (json.error?.length) throw new Error(json.error[0]);
+
+        const t = json.result['XXBTZUSD'];
+        if (!t) throw new Error('无效数据');
+
+        const price  = parseFloat(t.c[0]);
+        const open   = parseFloat(t.o);
+        const high   = parseFloat(t.h[1]);
+        const low    = parseFloat(t.l[1]);
+        const vol    = parseFloat(t.v[1]);
+        const vwap   = parseFloat(t.p[1]);
+        const trades = parseInt(t.t[1]);
+        const bid    = parseFloat(t.b[0]);
+        const ask    = parseFloat(t.a[0]);
+        const pct    = (price - open) / open * 100;
+
+        // ── Price display
+        const pd = document.getElementById('priceDisplay');
+        pd.textContent = fmtUSD(price);
+        pd.className   = pct >= 0 ? 'up' : 'down';
+
+        // ── 24h change %
+        const cp = document.getElementById('changePct');
+        const sign = pct >= 0 ? '+' : '';
+        cp.textContent = sign + pct.toFixed(2) + '%';
+        cp.className   = 'meta-val ' + (pct > 0 ? 'pos' : pct < 0 ? 'neg' : 'neu');
+
+        document.getElementById('high24').textContent  = fmtUSD(high);
+        document.getElementById('low24').textContent   = fmtUSD(low);
+        document.getElementById('open24').textContent  = fmtUSD(open);
+        document.getElementById('vol24').textContent   = fmtVol(vol) + ' BTC';
+        document.getElementById('vwap24').textContent  = fmtUSD(vwap);
+        document.getElementById('trades24').textContent = fmtTrades(trades);
+        document.getElementById('bidask').textContent  =
+            parseFloat(bid).toFixed(0) + ' / ' + parseFloat(ask).toFixed(0);
+
+        // ── Signal
+        updateSignal(pct, price);
+
+        // ── Status
+        dot.className       = 'dot';
+        conn.textContent    = '已连接 · Kraken';
+        document.getElementById('lastUpdate').textContent =
+            '更新于 ' + new Date().toLocaleTimeString('zh-CN', {hour12:false});
+
+    } catch (err) {
+        dot.className    = 'dot err';
+        conn.textContent = `连接失败: ${err.message}`;
+    }
+}
+
+// ── Countdown & auto-refresh ───────────────────────────
+
+function startTick() {
+    countdown = TICK;
+    if (tickTimer) clearInterval(tickTimer);
+    tickTimer = setInterval(() => {
+        countdown--;
+        document.getElementById('nextRefresh').textContent =
+            `下次刷新: ${countdown}s`;
+        if (countdown <= 0) {
+            countdown = TICK;
+            fetchTicker();
+        }
+    }, 1000);
+}
+
+// ── Boot ───────────────────────────────────────────────
+fetchTicker();
+startTick();
+</script>
+</body>
+</html>

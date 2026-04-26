@@ -24,17 +24,21 @@ BTC/USD 均值回归信号系统，接入 Kraken 公开 API，纯前端单文件
 
 ## 算法来源
 
-| 指标 | 来源 | 文件 |
+| 指标 | 来源 | 说明 |
 |------|------|------|
 | RSI (Wilder平滑) | Jesse | `jesse/indicators/rsi.py` |
 | 布林带 (SMA±2σ) | Jesse | `jesse/indicators/bollinger_bands.py` |
 | EMA | Jesse | `jesse/indicators/ema.py` |
 | VWAP (每日重置) | Jesse | `jesse/indicators/vwap.py` |
 | 信号触发逻辑 | Freqtrade | `freqtrade/templates/sample_strategy.py` |
+| MFI 资金流量指数 | ReinforcedQuickie | 替代原始成交量比率，第4评分维度 |
+| V型底识别 +10分 | ReinforcedQuickie | 5根连续下跌后反弹，BUY加速确认 |
+| 异常成交量屏蔽 | ClucMay72018 | 超均量20倍→拦截信号，防操纵 |
+| BB中轨动态目标 | ClucMay72018 | SMA20作为出场参考，替代固定+2% |
 
-**打分系统：** RSI 25分 + 布林带 25分 + VWAP 25分 + 成交量 25分 = 100分满分  
+**打分系统：** RSI 25分 + BB 25分 + VWAP 25分 + MFI 25分 = 100分（V底+10上限至100）  
 **信号阈值：** ≥70分才出信号；≥85分为强信号  
-**方向投票：** RSI / BB / VWAP 三指标多数决定做多或做空
+**方向投票：** RSI / BB / VWAP / MFI 四指标多数决定做多或做空
 
 ---
 
@@ -62,7 +66,12 @@ BTC/USD 均值回归信号系统，接入 Kraken 公开 API，纯前端单文件
 ## 文件结构
 
 ```
-btc-signal-v2.html   # 正式版（唯一维护对象）
-btc-signal.html      # 历史测试版，勿删
-CLAUDE.md            # 本文件
+btc-signal-v2.html        # ★ 正式版 — 唯一维护对象（赛博朋克UI + 完整信号引擎）
+backfill.html             # 冷启动工具 — 回填90天历史信号到localStorage
+backtest.py               # 策略回测脚本 — OKX数据，MA200牛熊过滤
+btc-signal.html           # 历史测试版，勿删勿改
+archive/                  # 归档目录（已废弃文件，勿引用）
+CLAUDE.md                 # 本文件
 ```
+
+> **btc-monitor.html 已废弃**，已归档至 archive/。所有功能均已整合进 btc-signal-v2.html。
