@@ -1,0 +1,1026 @@
+<!-- [DEPRECATED] 已废弃 — 所有功能已整合到 btc-signal-v2.html，请勿修改此文件 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BTC Signal Monitor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #07070f;
+            color: #c8c8d8;
+            font-family: 'Courier New', 'Consolas', monospace;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ── Scan-line overlay ─────────────────────────── */
+        .scanline {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 3px;
+            background: linear-gradient(transparent, rgba(247,147,26,.06), transparent);
+            animation: scanMove 10s linear infinite;
+            pointer-events: none; z-index: 9999;
+        }
+        @keyframes scanMove { 0%{top:-3px} 100%{top:100vh} }
+
+        /* ── Header ────────────────────────────────────── */
+        header {
+            background: #0b0b18;
+            border-bottom: 1px solid #1c1c30;
+            padding: 0 28px;
+            height: 54px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .logo { font-size: 17px; font-weight: 700; letter-spacing: 3px; color: #f7931a; }
+        .logo span { color: #e8e8f0; }
+
+        .toggle-group { display: flex; align-items: center; gap: 10px; }
+        .toggle-label { font-size: 12px; color: #666; letter-spacing: 1.5px; }
+        .switch { position: relative; width: 50px; height: 24px; cursor: pointer; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .knob {
+            position: absolute; inset: 0;
+            background: #1e1e30; border: 1px solid #333;
+            border-radius: 24px; transition: .3s;
+        }
+        .knob::before {
+            content: ''; position: absolute;
+            width: 16px; height: 16px; left: 3px; top: 3px;
+            background: #555; border-radius: 50%; transition: .3s;
+        }
+        .switch input:checked ~ .knob { background: #c0440a; border-color: #e05010; }
+        .switch input:checked ~ .knob::before { transform: translateX(26px); background: #fff; }
+        #modeTag { font-size: 12px; color: #555; letter-spacing: 1px; min-width: 28px; }
+
+        /* ── Status bar ────────────────────────────────── */
+        .statusbar {
+            background: #090915; border-bottom: 1px solid #15151f;
+            padding: 5px 28px; display: flex; align-items: center;
+            gap: 16px; font-size: 11.5px; color: #444;
+        }
+        .dot { width: 7px; height: 7px; border-radius: 50%; background: #00e07a; flex-shrink: 0; animation: pulse 2.5s infinite; }
+        .dot.err { background: #ff4040; animation: none; }
+        .dot.loading { background: #f7931a; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+        #lastUpdate { margin-left: auto; color: #3a3a50; }
+
+        /* ── News-mode banner ──────────────────────────── */
+        #newsBanner {
+            display: none;
+            background: linear-gradient(90deg, #160800, #2a1000, #160800);
+            border-bottom: 1px solid rgba(224,80,16,.35);
+            padding: 9px 28px; text-align: center;
+            font-size: 13px; letter-spacing: 2px; color: #e05010;
+        }
+
+        /* ── Main layout ───────────────────────────────── */
+        main {
+            max-width: 1100px; margin: 0 auto;
+            padding: 22px 24px 32px;
+            display: flex; flex-direction: column; gap: 16px;
+        }
+
+        /* ── Card base ─────────────────────────────────── */
+        .card {
+            background: #0c0c1a; border: 1px solid #181828;
+            border-radius: 8px; padding: 26px 28px;
+            position: relative; overflow: hidden;
+        }
+        .card::after {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(247,147,26,.25), transparent);
+        }
+
+        /* ── Price card ────────────────────────────────── */
+        #priceCard { text-align: center; }
+        .pair { font-size: 12px; color: #454558; letter-spacing: 3px; margin-bottom: 10px; }
+        #priceDisplay {
+            font-size: 76px; font-weight: 700;
+            letter-spacing: -2px; line-height: 1;
+            color: #e8e8f8; transition: color .5s;
+        }
+        #priceDisplay.up   { color: #00e07a; }
+        #priceDisplay.down { color: #ff4444; }
+        .price-meta {
+            display: flex; justify-content: center;
+            flex-wrap: wrap; gap: 0 36px; margin-top: 18px;
+        }
+        .meta-item { text-align: center; min-width: 90px; }
+        .meta-label { font-size: 10px; color: #3a3a58; letter-spacing: 1.5px; margin-bottom: 4px; }
+        .meta-val { font-size: 18px; font-weight: 700; }
+        .pos { color: #00e07a; }
+        .neg { color: #ff4444; }
+        .neu { color: #888; }
+
+        /* ── Signal card ───────────────────────────────── */
+        #signalCard { text-align: center; transition: background .5s, border-color .5s, box-shadow .5s; }
+        #signalCard.s-neutral  { border-color: #181828; }
+        #signalCard.s-warning  { border-color: #d4900a; background: #120e00; box-shadow: 0 0 28px rgba(212,144,10,.18); }
+        #signalCard.s-long     { border-color: #00c860; background: #001a0e; box-shadow: 0 0 38px rgba(0,200,96,.25); }
+        #signalCard.s-short    { border-color: #e03030; background: #1a0000; box-shadow: 0 0 38px rgba(224,48,48,.25); }
+        #signalCard.s-paused   { border-color: #333; background: #0d0d18; }
+
+        .sig-label { font-size: 11px; color: #444; letter-spacing: 2.5px; margin-bottom: 12px; }
+        #sigText {
+            font-size: 40px; font-weight: 700;
+            letter-spacing: 5px; line-height: 1; transition: color .4s;
+        }
+        .st-neutral { color: #404060; }
+        .st-warning { color: #d4900a; }
+        .st-long    { color: #00e07a; }
+        .st-short   { color: #e03030; }
+        .st-paused  { color: #444; }
+        #sigDesc { font-size: 13px; color: #505070; margin-top: 10px; }
+
+        @keyframes flashSig { 0%,100%{opacity:1} 20%,60%{opacity:.2} }
+        .flash { animation: flashSig .55s ease; }
+
+        /* ── Entry table (inside signal card) ──────────── */
+        .entry-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 14px 28px; margin-top: 20px; padding-top: 16px;
+            border-top: 1px solid #1c1c2e; text-align: left;
+        }
+        .e-label { font-size: 10px; color: #444466; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 4px; }
+        .e-val   { font-size: 17px; font-weight: 700; }
+        .e-tp  { color: #00e07a; }
+        .e-sl  { color: #ff4444; }
+        .e-rr  { color: #7986ff; }
+        .e-wr  { color: #f7931a; }
+        .e-neu { color: #c8c8e0; }
+
+        /* ── Score pills (inside signal card) ───────────── */
+        .score-row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; justify-content: center; }
+        .score-pill {
+            font-size: 11px; padding: 3px 10px;
+            border-radius: 12px; border: 1px solid #222238;
+            color: #606080; letter-spacing: .5px;
+        }
+        .score-pill.active { border-color: #f7931a44; color: #f7931a; }
+
+        /* ── Stats row ─────────────────────────────────── */
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+        .stat-card .card-label { font-size: 10.5px; color: #3a3a58; letter-spacing: 1.5px; margin-bottom: 6px; }
+        .stat-card .card-val   { font-size: 20px; font-weight: 700; color: #c8c8e0; }
+
+        /* ── Indicators card ───────────────────────────── */
+        .card-header { font-size: 10.5px; color: #3a3a58; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; }
+        .btn-refresh {
+            float: right; padding: 3px 10px; border-radius: 4px;
+            border: 1px solid #242438; background: transparent;
+            color: #555; font-size: 11px; cursor: pointer;
+        }
+        .btn-refresh:hover { border-color: #f7931a55; color: #f7931a; }
+        #indicatorOut {
+            background: #07070f; border: 1px solid #131320; border-radius: 5px;
+            padding: 12px 14px; font-size: 12px; line-height: 1.9;
+            overflow-x: auto; color: #585878; white-space: pre;
+        }
+        .c-ok   { color: #00c860; }
+        .c-err  { color: #e03030; }
+        .c-num  { color: #7986ff; }
+        .c-warn { color: #f7931a; }
+
+        /* ── History card ──────────────────────────────── */
+        .hist-head {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 14px; padding-bottom: 10px;
+            border-bottom: 1px solid #141420; flex-wrap: wrap; gap: 8px;
+        }
+        .hist-title { font-size: 12px; color: #555; letter-spacing: 2.5px; }
+        .hist-meta  { display: flex; gap: 14px; align-items: center; }
+        #winRate    { font-size: 12px; color: #f7931a; }
+        #histCount  { font-size: 11px; color: #333; }
+        .btn-clear {
+            padding: 3px 10px; border-radius: 4px; border: 1px solid #242430;
+            background: transparent; color: #404050; font-size: 11px; cursor: pointer;
+        }
+        .btn-clear:hover { border-color: #e03030; color: #e03030; }
+
+        .hist-cols, .hist-row {
+            display: grid;
+            grid-template-columns: 128px 66px 50px 1fr 1fr 1fr 82px;
+            gap: 8px; align-items: center;
+        }
+        .hist-cols { padding-bottom: 7px; border-bottom: 1px solid #131320; margin-bottom: 2px; }
+        .hist-col-label { font-size: 10px; color: #2e2e48; letter-spacing: 1px; }
+        .hist-row {
+            padding: 9px 0; border-bottom: 1px solid #0f0f1a;
+            font-size: 12.5px; animation: rowIn .4s ease;
+        }
+        @keyframes rowIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+        .hist-row:last-child { border-bottom: none; }
+        .hist-time  { color: #424260; font-size: 11.5px; }
+        .hist-price { font-weight: 700; color: #d0d0e8; }
+
+        .badge {
+            display: inline-block; font-size: 11px; font-weight: 700;
+            letter-spacing: .5px; padding: 3px 8px; border-radius: 4px;
+        }
+        .b-long  { background:rgba(0,200,96,.10);   color:#00c860; border:1px solid rgba(0,200,96,.3); }
+        .b-short { background:rgba(224,48,48,.10);  color:#e03030; border:1px solid rgba(224,48,48,.3); }
+        .b-win   { background:rgba(0,200,96,.08);   color:#00c860; border:1px solid rgba(0,200,96,.2); }
+        .b-loss  { background:rgba(224,48,48,.08);  color:#e03030; border:1px solid rgba(224,48,48,.2); }
+        .b-eod   { background:rgba(247,147,26,.08); color:#f7931a; border:1px solid rgba(247,147,26,.2); }
+        .b-open  { background:rgba(80,80,110,.08);  color:#555570; border:1px solid rgba(80,80,110,.2); }
+        .empty-hist { text-align:center; color:#282838; padding:28px; font-size:13px; letter-spacing:1px; }
+
+        /* ── Responsive ────────────────────────────────── */
+        @media(max-width:700px) {
+            .stats-grid { grid-template-columns: repeat(2,1fr); }
+            #priceDisplay { font-size: 46px; }
+            .entry-grid { grid-template-columns: 1fr; }
+            .hist-cols, .hist-row { grid-template-columns: 100px 60px 44px 1fr 80px; }
+            .hist-cols > *:nth-child(5), .hist-cols > *:nth-child(6),
+            .hist-row  > *:nth-child(5), .hist-row  > *:nth-child(6) { display:none; }
+        }
+    </style>
+</head>
+<body>
+<div class="scanline"></div>
+
+<!-- ── Header ──────────────────────────────────────────── -->
+<header>
+    <div class="logo">₿TC <span>SIGNAL</span></div>
+    <div class="toggle-group">
+        <span class="toggle-label">消息面模式</span>
+        <label class="switch">
+            <input type="checkbox" id="newsToggle" onchange="onNewsToggle()">
+            <span class="knob"></span>
+        </label>
+        <span id="modeTag">OFF</span>
+    </div>
+</header>
+
+<!-- ── Status bar ──────────────────────────────────────── -->
+<div class="statusbar">
+    <div class="dot" id="dot"></div>
+    <span id="connText">连接中…</span>
+    <span>·</span>
+    <span id="nextTicker">行情: --s</span>
+    <span>·</span>
+    <span id="nextSignal">信号: --s</span>
+    <span id="lastUpdate">--</span>
+</div>
+
+<!-- ── News-mode banner ─────────────────────────────────── -->
+<div id="newsBanner">
+    ⚠ &nbsp;消息面模式已启用 &mdash; 信号已屏蔽，请根据消息面自行判断市场方向&nbsp; ⚠
+</div>
+
+<!-- ── Main ────────────────────────────────────────────── -->
+<main>
+
+    <!-- Price card -->
+    <div class="card" id="priceCard">
+        <div class="pair">XBT / USD &nbsp;·&nbsp; KRAKEN &nbsp;·&nbsp; 实时行情</div>
+        <div id="priceDisplay">$--,---</div>
+        <div class="price-meta">
+            <div class="meta-item">
+                <div class="meta-label">24H 涨跌幅</div>
+                <div class="meta-val neu" id="changePct">--%</div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label">24H 最高</div>
+                <div class="meta-val pos" id="high24">--</div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label">24H 最低</div>
+                <div class="meta-val neg" id="low24">--</div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label">开盘价</div>
+                <div class="meta-val neu" id="open24">--</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signal card -->
+    <div class="card s-neutral" id="signalCard">
+        <div class="sig-label">SIGNAL ENGINE &nbsp;·&nbsp; RSI + BB + VWAP + MFI</div>
+        <div id="sigText" class="st-neutral">— &nbsp;待&nbsp;机&nbsp;中&nbsp; —</div>
+        <div id="sigDesc">等待 OHLC 数据加载…</div>
+        <div id="entryGrid" class="entry-grid" style="display:none"></div>
+        <div id="scoreBar" class="score-row" style="display:none"></div>
+    </div>
+
+    <!-- Stats row -->
+    <div class="stats-grid">
+        <div class="card stat-card">
+            <div class="card-label">24H 成交量 (BTC)</div>
+            <div class="card-val" id="vol24">--</div>
+        </div>
+        <div class="card stat-card">
+            <div class="card-label">24H 均价 (VWAP)</div>
+            <div class="card-val" id="vwap24">--</div>
+        </div>
+        <div class="card stat-card">
+            <div class="card-label">24H 成交笔数</div>
+            <div class="card-val" id="trades24">--</div>
+        </div>
+        <div class="card stat-card">
+            <div class="card-label">买一 / 卖一</div>
+            <div class="card-val" id="bidask" style="font-size:16px">-- / --</div>
+        </div>
+    </div>
+
+    <!-- Indicator detail card -->
+    <div class="card">
+        <div class="card-header">
+            指标详情 &amp; 评分明细
+            <button class="btn-refresh" onclick="runSignal()">↻ 刷新信号</button>
+        </div>
+        <div id="indicatorOut">等待数据…</div>
+    </div>
+
+    <!-- Signal history card -->
+    <div class="card">
+        <div class="hist-head">
+            <span class="hist-title">信号触发历史</span>
+            <div class="hist-meta">
+                <span id="winRate"></span>
+                <span id="histCount">共 0 条</span>
+                <button class="btn-clear" onclick="clearHistory()">清空</button>
+            </div>
+        </div>
+        <div class="hist-cols">
+            <span class="hist-col-label">触发时间</span>
+            <span class="hist-col-label">方向</span>
+            <span class="hist-col-label">评分</span>
+            <span class="hist-col-label">入场价</span>
+            <span class="hist-col-label">止损</span>
+            <span class="hist-col-label">目标</span>
+            <span class="hist-col-label">结果</span>
+        </div>
+        <div id="histList"><div class="empty-hist">暂无触发记录</div></div>
+    </div>
+
+</main>
+
+<script>
+'use strict';
+
+/* ================================================================
+   CONFIG
+   ================================================================ */
+const CONFIG = {
+    pair:            'XBTUSD',
+    KRAKEN_REST:     'https://api.kraken.com/0/public',
+    RSI_PERIOD:      14,
+    BB_PERIOD:       20,
+    BB_STD:           2,
+    EMA_SHORT:       20,
+    EMA_LONG:        50,
+    VOL_PERIOD:      20,
+    INTERVAL_15M:    15,
+    SIG_THRESHOLD:   70,
+    STOP_LOSS_PCT:   0.015,
+    TAKE_PROFIT_PCT: 0.020,
+};
+
+const TICKER_INTERVAL = 5;
+const SIGNAL_INTERVAL = 30;
+const HISTORY_KEY     = 'btc_signal_history';
+
+let newsMode        = false;
+let tickerCountdown = TICKER_INTERVAL;
+let signalCountdown = SIGNAL_INTERVAL;
+
+/* ================================================================
+   FORMATTERS
+   ================================================================ */
+function fmtUSD(n) {
+    return '$' + parseFloat(n).toLocaleString('en-US',
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtVol(v) {
+    v = parseFloat(v);
+    return v >= 1e4 ? (v / 1e3).toFixed(1) + 'K' : v.toFixed(2);
+}
+function fmtTrades(n) {
+    n = parseInt(n);
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e4) return (n / 1e3).toFixed(1) + 'K';
+    return n.toLocaleString();
+}
+
+/* ================================================================
+   NEWS MODE
+   ================================================================ */
+function onNewsToggle() {
+    newsMode = document.getElementById('newsToggle').checked;
+    document.getElementById('modeTag').textContent      = newsMode ? 'ON' : 'OFF';
+    document.getElementById('newsBanner').style.display = newsMode ? 'block' : 'none';
+    if (newsMode) {
+        applySignalUI('paused', '⏸ &nbsp;消息面模式', '信号已屏蔽 — 高波动期间请勿依赖技术信号');
+        document.getElementById('entryGrid').style.display = 'none';
+        document.getElementById('scoreBar').style.display  = 'none';
+    } else {
+        runSignal();
+    }
+}
+
+/* ================================================================
+   KRAKEN TICKER API (5s) — price display only
+   ================================================================ */
+async function fetchTicker() {
+    const dot  = document.getElementById('dot');
+    const conn = document.getElementById('connText');
+    dot.className = 'dot loading';
+
+    try {
+        const res  = await fetch(CONFIG.KRAKEN_REST + '/Ticker?pair=' + CONFIG.pair);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const json = await res.json();
+        if (json.error && json.error.length) throw new Error(json.error[0]);
+
+        const t = json.result['XXBTZUSD'];
+        if (!t) throw new Error('无效数据');
+
+        const price  = parseFloat(t.c[0]);
+        const open   = parseFloat(t.o);
+        const high   = parseFloat(t.h[1]);
+        const low    = parseFloat(t.l[1]);
+        const vol    = parseFloat(t.v[1]);
+        const vwap   = parseFloat(t.p[1]);
+        const trades = parseInt(t.t[1]);
+        const bid    = parseFloat(t.b[0]);
+        const ask    = parseFloat(t.a[0]);
+        const pct    = (price - open) / open * 100;
+
+        const pd = document.getElementById('priceDisplay');
+        pd.textContent = fmtUSD(price);
+        pd.className   = pct >= 0 ? 'up' : 'down';
+
+        const sign = pct >= 0 ? '+' : '';
+        const cp = document.getElementById('changePct');
+        cp.textContent = sign + pct.toFixed(2) + '%';
+        cp.className   = 'meta-val ' + (pct > 0 ? 'pos' : pct < 0 ? 'neg' : 'neu');
+
+        document.getElementById('high24').textContent   = fmtUSD(high);
+        document.getElementById('low24').textContent    = fmtUSD(low);
+        document.getElementById('open24').textContent   = fmtUSD(open);
+        document.getElementById('vol24').textContent    = fmtVol(vol) + ' BTC';
+        document.getElementById('vwap24').textContent   = fmtUSD(vwap);
+        document.getElementById('trades24').textContent = fmtTrades(trades);
+        document.getElementById('bidask').textContent   =
+            bid.toFixed(0) + ' / ' + ask.toFixed(0);
+
+        updateOpenSignals(price);
+
+        dot.className = 'dot';
+        conn.textContent = '已连接 · Kraken';
+        document.getElementById('lastUpdate').textContent =
+            '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+
+    } catch (err) {
+        dot.className    = 'dot err';
+        conn.textContent = '连接失败: ' + err.message;
+    }
+}
+
+/* ================================================================
+   KRAKEN OHLC API (30s) — candles for signal engine
+   ================================================================ */
+async function fetchOHLC(interval) {
+    const url  = CONFIG.KRAKEN_REST + '/OHLC?pair=' + CONFIG.pair + '&interval=' + interval;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.error && data.error.length) throw new Error(data.error[0]);
+    const raw = data.result[CONFIG.pair] || data.result['XXBTZUSD'];
+    return raw.map(c => ({
+        time:   c[0] * 1000,
+        open:   parseFloat(c[1]),
+        high:   parseFloat(c[2]),
+        low:    parseFloat(c[3]),
+        close:  parseFloat(c[4]),
+        volume: parseFloat(c[6]),
+    }));
+}
+
+/* ================================================================
+   INDICATORS
+   Source: Jesse (jesse/indicators/rsi.py) — Wilder smoothing
+   ================================================================ */
+function calcRSI(closes, period) {
+    period = period || CONFIG.RSI_PERIOD;
+    if (closes.length < period + 1) return null;
+    let avgGain = 0, avgLoss = 0;
+    for (let i = 1; i <= period; i++) {
+        const d = closes[i] - closes[i - 1];
+        if (d > 0) avgGain += d; else avgLoss += Math.abs(d);
+    }
+    avgGain /= period; avgLoss /= period;
+    for (let i = period + 1; i < closes.length; i++) {
+        const d = closes[i] - closes[i - 1];
+        avgGain = (avgGain * (period - 1) + (d > 0 ? d : 0))           / period;
+        avgLoss = (avgLoss * (period - 1) + (d < 0 ? Math.abs(d) : 0)) / period;
+    }
+    if (avgLoss === 0) return 100;
+    return 100 - (100 / (1 + avgGain / avgLoss));
+}
+
+/* Source: Jesse (jesse/indicators/bollinger_bands.py) */
+function calcBB(closes, period, mult) {
+    period = period || CONFIG.BB_PERIOD; mult = mult || CONFIG.BB_STD;
+    if (closes.length < period) return null;
+    const slice  = closes.slice(-period);
+    const middle = slice.reduce((s, v) => s + v, 0) / period;
+    const std    = Math.sqrt(slice.reduce((s, v) => s + (v - middle) ** 2, 0) / period);
+    const upper  = middle + mult * std;
+    const lower  = middle - mult * std;
+    const last   = closes[closes.length - 1];
+    const pct    = upper !== lower ? (last - lower) / (upper - lower) : 0.5;
+    const width  = middle !== 0   ? (upper - lower) / middle          : 0;
+    return { upper, middle, lower, pct, width };
+}
+
+/* Source: Jesse (jesse/indicators/ema.py) */
+function calcEMA(closes, period) {
+    if (closes.length < period) return closes[closes.length - 1];
+    const k = 2 / (period + 1);
+    let ema = closes.slice(0, period).reduce((s, v) => s + v, 0) / period;
+    for (let i = period; i < closes.length; i++) ema = closes[i] * k + ema * (1 - k);
+    return ema;
+}
+
+/* Source: Jesse (jesse/indicators/vwap.py) — daily reset */
+function calcVWAP(candles) {
+    if (!candles || !candles.length) return null;
+    const now   = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    let cumVP = 0, cumV = 0;
+    for (const c of candles) {
+        if (c.time < today) continue;
+        const tp = (c.high + c.low + c.close) / 3;
+        cumVP += tp * c.volume;
+        cumV  += c.volume;
+    }
+    return cumV > 0 ? cumVP / cumV : null;
+}
+
+function calcVolRatio(volumes, period) {
+    period = period || CONFIG.VOL_PERIOD;
+    if (volumes.length < period + 1) return 1;
+    const avg = volumes.slice(-period - 1, -1).reduce((s, v) => s + v, 0) / period;
+    return avg > 0 ? volumes[volumes.length - 1] / avg : 1;
+}
+
+/* Source: ReinforcedQuickie / CryptoSignal — MFI */
+function calcMFI(candles, period) {
+    period = period || 14;
+    if (candles.length < period + 1) return 50;
+    const slice = candles.slice(-(period + 1));
+    let pos = 0, neg = 0;
+    for (let i = 1; i <= period; i++) {
+        const tp  = (slice[i].high   + slice[i].low   + slice[i].close)   / 3;
+        const tpP = (slice[i-1].high + slice[i-1].low + slice[i-1].close) / 3;
+        const mf  = tp * slice[i].volume;
+        if      (tp > tpP) pos += mf;
+        else if (tp < tpP) neg += mf;
+    }
+    if (neg === 0) return 100;
+    return 100 - 100 / (1 + pos / neg);
+}
+
+/* Source: ReinforcedQuickie — V-bottom: 5 declining bars then upturn */
+function detectVBottom(candles) {
+    if (candles.length < 6) return false;
+    const avg = candles.slice(-6).map(c => (c.open + c.high + c.low + c.close) / 4);
+    for (let i = 0; i < 4; i++) if (avg[i] <= avg[i + 1]) return false;
+    return avg[5] > avg[4];
+}
+
+/* ================================================================
+   SCORING  (0-25 per indicator, vote ±1)
+   Source: Freqtrade sample_strategy.py trigger structure
+   ================================================================ */
+function scoreRSI(rsi) {
+    if (rsi === null) return { score: 0, vote: 0 };
+    let score = 0, vote = 0;
+    if      (rsi <= 20) { score = 25; vote = +1; }
+    else if (rsi <= 30) { score = 20; vote = +1; }
+    else if (rsi <= 38) { score = 10; vote = +1; }
+    else if (rsi <= 45) { score =  4; vote = +1; }
+    else if (rsi <  55) { score =  0; vote =  0; }
+    else if (rsi <  62) { score =  4; vote = -1; }
+    else if (rsi <  70) { score = 10; vote = -1; }
+    else if (rsi <  80) { score = 20; vote = -1; }
+    else                { score = 25; vote = -1; }
+    return { score, vote };
+}
+
+function scoreBB(pct) {
+    let score = 0, vote = 0;
+    if      (pct <= 0)    { score = 25; vote = +1; }
+    else if (pct <= 0.1)  { score = 22; vote = +1; }
+    else if (pct <= 0.2)  { score = 16; vote = +1; }
+    else if (pct <= 0.35) { score =  7; vote = +1; }
+    else if (pct <= 0.65) { score =  0; vote =  0; }
+    else if (pct <= 0.8)  { score =  7; vote = -1; }
+    else if (pct <= 0.9)  { score = 16; vote = -1; }
+    else if (pct <= 1.0)  { score = 22; vote = -1; }
+    else                  { score = 25; vote = -1; }
+    return { score, vote };
+}
+
+function scoreVWAP(devPct) {
+    const abs = Math.abs(devPct);
+    let score = 0;
+    if      (abs >= 2.0) score = 25;
+    else if (abs >= 1.2) score = 20;
+    else if (abs >= 0.6) score = 14;
+    else if (abs >= 0.3) score =  7;
+    else                 score =  2;
+    const vote = devPct < 0 ? +1 : devPct > 0 ? -1 : 0;
+    return { score, vote };
+}
+
+/* Source: ReinforcedQuickie — MFI replaces raw vol ratio */
+function scoreMFI(mfi) {
+    let score = 0, vote = 0;
+    if      (mfi <= 20) { score = 25; vote = +1; }
+    else if (mfi <= 30) { score = 20; vote = +1; }
+    else if (mfi <= 38) { score = 10; vote = +1; }
+    else if (mfi <= 45) { score =  4; vote = +1; }
+    else if (mfi <  55) { score =  0; vote =  0; }
+    else if (mfi <  62) { score =  4; vote = -1; }
+    else if (mfi <  70) { score = 10; vote = -1; }
+    else if (mfi <  80) { score = 20; vote = -1; }
+    else                { score = 25; vote = -1; }
+    return { score, vote };
+}
+
+/* ================================================================
+   RISK MANAGER
+   Source: Freqtrade populate_entry_trend EMA filter
+   ================================================================ */
+function riskCheck(direction, ema20, ema50) {
+    if (newsMode)                               return { pass: false, reason: '消息面屏蔽已开启' };
+    if (direction === 'BUY'  && ema20 < ema50)  return { pass: false, reason: 'EMA20 < EMA50：空头趋势，禁止做多' };
+    if (direction === 'SELL' && ema20 > ema50)  return { pass: false, reason: 'EMA20 > EMA50：多头趋势，禁止做空' };
+    return { pass: true, reason: '通过' };
+}
+
+/* ================================================================
+   SIGNAL ENGINE — RSI 25 + BB 25 + VWAP 25 + MFI 25 = 100
+   ================================================================ */
+function generateSignal(closes, candles, volumes) {
+    const last     = closes[closes.length - 1];
+    const rsi      = calcRSI(closes);
+    const bb       = calcBB(closes);
+    const vwap     = calcVWAP(candles);
+    const ema20    = calcEMA(closes, CONFIG.EMA_SHORT);
+    const ema50    = calcEMA(closes, CONFIG.EMA_LONG);
+    const volRatio = calcVolRatio(volumes);
+    const mfi      = calcMFI(candles);
+
+    const volAvg30 = volumes.length >= 31
+        ? volumes.slice(-31, -1).reduce((s, v) => s + v, 0) / 30 : 0;
+    const volSpike = volAvg30 > 0 && volumes[volumes.length - 1] > volAvg30 * 20;
+
+    const rsiR  = scoreRSI(rsi);
+    const bbR   = scoreBB(bb ? bb.pct : 0.5);
+    const vwapR = vwap ? scoreVWAP((last - vwap) / vwap * 100) : { score: 0, vote: 0 };
+    const mfiR  = scoreMFI(mfi);
+
+    const vBottom    = detectVBottom(candles);
+    const vBonus     = vBottom ? 10 : 0;
+    const baseScore  = rsiR.score + bbR.score + vwapR.score + mfiR.score;
+    const totalScore = Math.min(100, baseScore + vBonus);
+
+    const votes     = rsiR.vote + bbR.vote + vwapR.vote + mfiR.vote;
+    const direction = votes > 0 ? 'BUY' : votes < 0 ? 'SELL' : 'NEUTRAL';
+
+    const risk = volSpike
+        ? { pass: false, reason: '成交量异常（超均量20倍），疑似操纵，信号屏蔽' }
+        : riskCheck(direction, ema20, ema50);
+
+    const strength  = totalScore >= 85 ? '强信号' : totalScore >= CONFIG.SIG_THRESHOLD ? '弱信号' : '未达阈值';
+    const stopLong  = (last * (1 - CONFIG.STOP_LOSS_PCT)).toFixed(2);
+    const stopShort = (last * (1 + CONFIG.STOP_LOSS_PCT)).toFixed(2);
+
+    return {
+        score: totalScore, direction, strength, risk,
+        scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, mfi: mfiR.score, vBonus },
+        votes:  { rsi: rsiR.vote,  bb: bbR.vote,  vwap: vwapR.vote,  mfi: mfiR.vote  },
+        raw:    { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last },
+        stopLong, stopShort,
+    };
+}
+
+/* ================================================================
+   HISTORY  (localStorage, max 50)
+   ================================================================ */
+function loadHistory()       { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } }
+function saveHistory(list)   { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(-50))); }
+
+function logSignal(sig) {
+    if (sig.score < CONFIG.SIG_THRESHOLD || !sig.risk.pass) return;
+    const history = loadHistory();
+    const last    = history[history.length - 1];
+    const now     = Date.now();
+    if (last && last.direction === sig.direction && (now - last.ts) < 30 * 60 * 1000) return;
+
+    const { rsi, bb, ema20, ema50, last: price } = sig.raw;
+    history.push({
+        ts:        now,
+        time:      new Date(now).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
+        direction: sig.direction,
+        strength:  sig.strength,
+        score:     sig.score,
+        price:     price.toFixed(2),
+        stop:      sig.direction === 'BUY' ? sig.stopLong : sig.stopShort,
+        bbTarget:  bb ? parseFloat(bb.middle.toFixed(2)) : null,
+        rsi:       rsi ? rsi.toFixed(1) : '--',
+        bbPct:     bb  ? (bb.pct * 100).toFixed(1) + '%' : '--',
+        emaTrend:  ema20 > ema50 ? '多头' : '空头',
+        outcome:   null,
+    });
+    saveHistory(history);
+}
+
+function updateOpenSignals(currentPrice) {
+    const history = loadHistory();
+    let changed = false;
+    for (const h of history) {
+        if (h.outcome) continue;
+        const sl = parseFloat(h.stop);
+        const tp = h.bbTarget != null ? parseFloat(h.bbTarget) : null;
+        if (tp == null) continue;
+        if (h.direction === 'BUY') {
+            if (currentPrice <= sl)      { h.outcome = 'LOSS'; changed = true; }
+            else if (currentPrice >= tp) { h.outcome = 'WIN';  changed = true; }
+        } else {
+            if (currentPrice >= sl)      { h.outcome = 'LOSS'; changed = true; }
+            else if (currentPrice <= tp) { h.outcome = 'WIN';  changed = true; }
+        }
+    }
+    if (changed) { saveHistory(history); renderHistory(); }
+}
+
+function clearHistory() {
+    if (!confirm('确认清空所有历史记录？')) return;
+    localStorage.removeItem(HISTORY_KEY);
+    renderHistory();
+}
+
+function renderHistory() {
+    const history = loadHistory();
+    const list  = document.getElementById('histList');
+    const count = document.getElementById('histCount');
+    const wr    = document.getElementById('winRate');
+
+    count.textContent = '共 ' + history.length + ' 条';
+
+    const resolved = history.filter(h => h.outcome === 'WIN' || h.outcome === 'LOSS');
+    const wins     = resolved.filter(h => h.outcome === 'WIN').length;
+    if (resolved.length >= 3) {
+        wr.textContent = '胜率 ' + (wins / resolved.length * 100).toFixed(0) + '%（' + wins + '/' + resolved.length + '）';
+    } else if (resolved.length > 0) {
+        wr.textContent = wins + '/' + resolved.length + ' 已结算';
+    } else {
+        wr.textContent = '';
+    }
+
+    if (!history.length) {
+        list.innerHTML = '<div class="empty-hist">暂无触发记录 — 等待信号触发</div>';
+        return;
+    }
+
+    const fmt = v => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 });
+    const outcomeHtml = o =>
+        o === 'WIN'  ? '<span class="badge b-win">✓ WIN</span>'   :
+        o === 'LOSS' ? '<span class="badge b-loss">✗ LOSS</span>' :
+        o === 'EOD'  ? '<span class="badge b-eod">⏸ EOD</span>'  :
+                       '<span class="badge b-open">持仓中</span>';
+
+    list.innerHTML = history.slice().reverse().map(h =>
+        '<div class="hist-row">'
+      + '<span class="hist-time">' + h.time + '</span>'
+      + '<span><span class="badge ' + (h.direction === 'BUY' ? 'b-long">▲ 多' : 'b-short">▼ 空') + '</span></span>'
+      + '<span style="color:#7986ff;font-weight:700">' + h.score + '</span>'
+      + '<span class="hist-price">$' + fmt(h.price) + '</span>'
+      + '<span style="color:#ff4444">$' + fmt(h.stop) + '</span>'
+      + '<span style="color:#00c860">' + (h.bbTarget ? '$' + fmt(h.bbTarget) : '--') + '</span>'
+      + '<span>' + outcomeHtml(h.outcome) + '</span>'
+      + '</div>'
+    ).join('');
+}
+
+/* ================================================================
+   SIGNAL CARD UI
+   ================================================================ */
+function applySignalUI(level, textHTML, desc) {
+    document.getElementById('signalCard').className = 'card s-' + level;
+    const txt = document.getElementById('sigText');
+    txt.className  = 'st-' + level;
+    txt.innerHTML  = textHTML;
+    document.getElementById('sigDesc').textContent = desc;
+}
+
+function renderSignalCard(sig) {
+    if (newsMode) {
+        applySignalUI('paused', '⏸ &nbsp;消息面模式', '信号已屏蔽 — 高波动期间请勿依赖技术信号');
+        document.getElementById('entryGrid').style.display = 'none';
+        document.getElementById('scoreBar').style.display  = 'none';
+        return;
+    }
+
+    // Score pills — always visible
+    const sp = document.getElementById('scoreBar');
+    sp.style.display = 'flex';
+    const pills = [
+        { label: 'RSI '  + sig.scores.rsi  + '/25', active: sig.scores.rsi  >= 10 },
+        { label: 'BB '   + sig.scores.bb   + '/25', active: sig.scores.bb   >= 10 },
+        { label: 'VWAP ' + sig.scores.vwap + '/25', active: sig.scores.vwap >= 10 },
+        { label: 'MFI '  + sig.scores.mfi  + '/25', active: sig.scores.mfi  >= 10 },
+    ];
+    if (sig.scores.vBonus) pills.push({ label: 'V底 +' + sig.scores.vBonus, active: true });
+    sp.innerHTML = pills.map(p =>
+        '<span class="score-pill' + (p.active ? ' active' : '') + '">' + p.label + '</span>'
+    ).join('');
+
+    const aboveThreshold = sig.score >= CONFIG.SIG_THRESHOLD;
+    const blocked        = !sig.risk.pass;
+
+    if (blocked || !aboveThreshold) {
+        applySignalUI(
+            blocked ? 'warning' : 'neutral',
+            blocked ? '⛔ &nbsp;信号已拦截' : '— &nbsp;观 &nbsp; 望 &nbsp; —',
+            blocked ? '风控：' + sig.risk.reason : '评分 ' + sig.score + '/100 未达阈值（≥' + CONFIG.SIG_THRESHOLD + '）'
+        );
+        document.getElementById('entryGrid').style.display = 'none';
+        return;
+    }
+
+    const isBuy   = sig.direction === 'BUY';
+    const level   = isBuy ? 'long' : 'short';
+    const txt     = isBuy ? '▲ &nbsp;做 &nbsp; 多' : '▼ &nbsp;做 &nbsp; 空';
+    applySignalUI(level, txt, sig.strength + ' · 评分 ' + sig.score + '/100');
+
+    const t = document.getElementById('sigText');
+    t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash');
+
+    const entryP     = sig.raw.last;
+    const stopPrice  = isBuy ? sig.stopLong : sig.stopShort;
+    const tpFallback = isBuy
+        ? (entryP * (1 + CONFIG.TAKE_PROFIT_PCT)).toFixed(2)
+        : (entryP * (1 - CONFIG.TAKE_PROFIT_PCT)).toFixed(2);
+    const bbMid      = sig.raw.bb ? sig.raw.bb.middle : null;
+    const tpDisplay  = bbMid
+        ? fmtUSD(bbMid) + ' <small style="color:#3a3a58">(BB中轨)</small>'
+        : fmtUSD(tpFallback);
+    const rrRatio    = (CONFIG.TAKE_PROFIT_PCT / CONFIG.STOP_LOSS_PCT).toFixed(2);
+
+    const hist     = loadHistory();
+    const resolved = hist.filter(h => h.outcome === 'WIN' || h.outcome === 'LOSS');
+    const wins     = resolved.filter(h => h.outcome === 'WIN').length;
+    const wrText   = resolved.length >= 3
+        ? '胜率 ' + (wins / resolved.length * 100).toFixed(0) + '%（' + wins + '/' + resolved.length + ' 已结算）'
+        : resolved.length > 0 ? wins + '/' + resolved.length + ' 已结算（样本不足）'
+        : '暂无结算记录';
+
+    const eg = document.getElementById('entryGrid');
+    eg.style.display = 'grid';
+    eg.innerHTML =
+        '<div><div class="e-label">进场价</div><div class="e-val e-neu">' + fmtUSD(entryP) + '</div></div>'
+      + '<div><div class="e-label">目标价 (BB中轨)</div><div class="e-val e-tp">' + tpDisplay + '</div></div>'
+      + '<div><div class="e-label">止损价 -' + (CONFIG.STOP_LOSS_PCT * 100).toFixed(1) + '%</div><div class="e-val e-sl">' + fmtUSD(stopPrice) + '</div></div>'
+      + '<div><div class="e-label">盈亏比</div><div class="e-val e-rr">' + rrRatio + ' : 1</div></div>'
+      + (sig.raw.vBottom ? '<div style="grid-column:1/-1"><div class="e-label">形态识别</div><div class="e-val e-tp">▲ V型底 +10分</div></div>' : '')
+      + '<div style="grid-column:1/-1"><div class="e-label">历史胜率</div><div class="e-val e-wr">' + wrText + '</div></div>';
+}
+
+/* ================================================================
+   INDICATOR OUTPUT RENDERER
+   ================================================================ */
+function renderIndicators(sig, candles) {
+    const out = document.getElementById('indicatorOut');
+    const { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last } = sig.raw;
+
+    const ok   = s => '<span class="c-ok">'   + s + '</span>';
+    const err  = s => '<span class="c-err">'  + s + '</span>';
+    const num  = s => '<span class="c-num">'  + s + '</span>';
+    const warn = s => '<span class="c-warn">' + s + '</span>';
+
+    let h = '';
+
+    h += '最新3根K线：\n';
+    candles.slice(-3).forEach(cv => {
+        h += '  ' + new Date(cv.time).toLocaleTimeString('zh-CN')
+           + '  收:' + num(cv.close.toFixed(0))
+           + '  量:' + cv.volume.toFixed(2) + '\n';
+    });
+
+    h += '\n指标数值：\n';
+    h += '  RSI(14)  = ' + num(rsi ? rsi.toFixed(2) : '--')
+       + '  [' + (rsi < 30 ? '超卖' : rsi > 70 ? '超买' : '中性') + ']'
+       + '  票：' + (sig.votes.rsi > 0 ? '▲多' : sig.votes.rsi < 0 ? '▼空' : '中立') + '\n';
+    if (bb) {
+        h += '  BB%      = ' + num((bb.pct * 100).toFixed(1) + '%')
+           + '  [' + (bb.pct < 0.2 ? '触下轨' : bb.pct > 0.8 ? '触上轨' : '中区') + ']'
+           + '  票：' + (sig.votes.bb > 0 ? '▲多' : sig.votes.bb < 0 ? '▼空' : '中立') + '\n';
+    }
+    if (vwap) {
+        const dev = (last - vwap) / vwap * 100;
+        h += '  VWAP偏离 = ' + num((dev >= 0 ? '+' : '') + dev.toFixed(2) + '%')
+           + '  [$' + vwap.toFixed(2) + ']'
+           + '  票：' + (sig.votes.vwap > 0 ? '▲多' : sig.votes.vwap < 0 ? '▼空' : '中立') + '\n';
+    } else {
+        h += '  VWAP     = ' + warn('今日数据不足') + '  票：中立\n';
+    }
+    h += '  MFI(14)  = ' + num(mfi.toFixed(1))
+       + '  [' + (mfi <= 30 ? '超卖' : mfi >= 70 ? '超买' : '中性') + ']'
+       + '  票：' + (sig.votes.mfi > 0 ? '▲多' : sig.votes.mfi < 0 ? '▼空' : '中立') + '\n';
+    h += '  成交量比  = ' + (volSpike ? err(volRatio.toFixed(2) + 'x') : num(volRatio.toFixed(2) + 'x'))
+       + '  [' + (volSpike ? '⚠ 异常放量' : volRatio >= 1.5 ? '放量' : volRatio < 0.7 ? '缩量' : '正常') + ']\n';
+    h += '  EMA20/50 = ' + num(ema20.toFixed(0)) + ' / ' + num(ema50.toFixed(0))
+       + '  [' + (ema20 > ema50 ? '多头排列' : '空头排列') + ']\n';
+    if (vBottom) h += '  ' + ok('▲ V型底识别：连续5根下跌后反弹，+10分') + '\n';
+
+    h += '\n评分明细（满分100）：\n';
+    [
+        { label: 'RSI   ', score: sig.scores.rsi,  color: '#2962ff' },
+        { label: 'BB    ', score: sig.scores.bb,   color: '#f59e0b' },
+        { label: 'VWAP  ', score: sig.scores.vwap, color: '#00c860' },
+        { label: 'MFI   ', score: sig.scores.mfi,  color: '#9c27b0' },
+    ].forEach(b => {
+        const filled = Math.round(b.score / 25 * 20);
+        const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
+        h += '  ' + b.label + ' [<span style="color:' + b.color + '">' + bar + '</span>] '
+           + num(b.score + '/25') + '\n';
+    });
+    h += '  ' + '─'.repeat(40) + '\n';
+    h += '  合计      ' + num(sig.score + '/100') + '  ' + sig.strength + '\n';
+
+    const vt = sig.votes.rsi + sig.votes.bb + sig.votes.vwap + sig.votes.mfi;
+    h += '\n方向投票：RSI(' + (sig.votes.rsi  > 0 ? '+1' : sig.votes.rsi  < 0 ? '-1' : ' 0') + ')'
+       + ' + BB('   + (sig.votes.bb   > 0 ? '+1' : sig.votes.bb   < 0 ? '-1' : ' 0') + ')'
+       + ' + VWAP(' + (sig.votes.vwap > 0 ? '+1' : sig.votes.vwap < 0 ? '-1' : ' 0') + ')'
+       + ' + MFI('  + (sig.votes.mfi  > 0 ? '+1' : sig.votes.mfi  < 0 ? '-1' : ' 0') + ')'
+       + ' = ' + (vt > 0 ? ok('▲做多') : vt < 0 ? err('▼做空') : '中立') + '\n';
+    h += '\n风控：' + (sig.risk.pass ? ok('✓ 通过') : err('⛔ 拦截 — ' + sig.risk.reason)) + '\n';
+    h += '\n' + ok('✓ 信号引擎 OK') + '  ' + new Date().toLocaleTimeString('zh-CN');
+
+    out.innerHTML = h;
+}
+
+/* ================================================================
+   MAIN SIGNAL RUN (every 30s)
+   ================================================================ */
+async function runSignal() {
+    const out = document.getElementById('indicatorOut');
+    out.innerHTML = '正在获取 OHLC 数据…';
+    try {
+        const candles = await fetchOHLC(CONFIG.INTERVAL_15M);
+        const closes  = candles.map(c => c.close);
+        const volumes = candles.map(c => c.volume);
+        const last    = closes[closes.length - 1];
+
+        updateOpenSignals(last);
+        const sig = generateSignal(closes, candles, volumes);
+        renderSignalCard(sig);
+        logSignal(sig);
+        renderHistory();
+        renderIndicators(sig, candles);
+    } catch (err) {
+        out.innerHTML = '<span class="c-err">✗ OHLC 获取失败: ' + err.message + '</span>';
+    }
+}
+
+/* ================================================================
+   DUAL TIMERS  (5s ticker + 30s signal)
+   ================================================================ */
+function startTimers() {
+    setInterval(() => {
+        tickerCountdown--;
+        document.getElementById('nextTicker').textContent = '行情: ' + tickerCountdown + 's';
+        if (tickerCountdown <= 0) {
+            tickerCountdown = TICKER_INTERVAL;
+            fetchTicker();
+        }
+
+        signalCountdown--;
+        document.getElementById('nextSignal').textContent = '信号: ' + signalCountdown + 's';
+        if (signalCountdown <= 0) {
+            signalCountdown = SIGNAL_INTERVAL;
+            runSignal();
+        }
+    }, 1000);
+}
+
+/* ================================================================
+   BOOT
+   ================================================================ */
+fetchTicker();
+runSignal();
+renderHistory();
+startTimers();</script>
+</body>
+</html>

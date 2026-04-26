@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BTC Signal v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* ── Design Tokens ─────────────────────────────────────────── */
+:root {
+    --bg-primary:    #0a0a0a;
+    --bg-elevated:   #131722;
+    --bg-hover:      #1e222d;
+    --border-subtle: #1e222d;
+    --border-default:#2a2e39;
+    --text-primary:  #d1d4dc;
+    --text-secondary:#787b86;
+    --text-muted:    #4a4f5e;
+    --accent:        #2962ff;
+    --green:         #26a69a;
+    --red:           #ef5350;
+    --yellow:        #ffb74d;
+    --font-ui:  'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono:'JetBrains Mono','SF Mono','Fira Code','Consolas',monospace;
+    --r: 6px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 13px; }
+body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    line-height: 1.5;
+    min-height: 100vh;
+}
+button { cursor: pointer; font-family: inherit; }
+input  { font-family: inherit; }
+.mono  { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
+
+/* ── Number flash (only animation allowed) ────────────────── */
+@keyframes numFlash { 0%{opacity:.25} 100%{opacity:1} }
+.flashing { animation: numFlash .2s ease-out; }
+
+/* ── Header (48px) ────────────────────────────────────────── */
+header {
+    height: 48px;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-default);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 16px;
+    position: sticky; top: 0; z-index: 100;
+}
+.hdr-l { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.logo   { font-weight: 600; font-size: 14px; color: var(--text-primary); letter-spacing: .5px; }
+.logo em { color: var(--accent); font-style: normal; }
+.pair-meta { font-size: 11px; color: var(--text-muted); letter-spacing: .5px; }
+
+.hdr-c { display: flex; align-items: center; gap: 10px; flex: 1; justify-content: center; }
+#tb-price {
+    font-family: var(--font-mono);
+    font-feature-settings: "tnum" 1;
+    font-size: 22px; font-weight: 600;
+    color: var(--text-primary);
+}
+.chg-badge {
+    font-family: var(--font-mono);
+    font-size: 11px; font-weight: 600;
+    padding: 2px 8px; border-radius: 4px;
+    background: var(--bg-hover);
+    color: var(--text-muted);
+}
+.chg-badge.up   { background: rgba(38,166,154,.15); color: var(--green); }
+.chg-badge.down { background: rgba(239,83,80,.12);  color: var(--red);   }
+
+.hdr-r { display: flex; align-items: center; gap: 12px; flex-shrink: 0; margin-left: auto; }
+.hdr-countdown { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+.news-toggle-wrap { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.news-toggle-wrap input { width: 0; height: 0; opacity: 0; position: absolute; }
+#newsLabel {
+    font-size: 11px; font-weight: 500; padding: 3px 8px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--r); color: var(--text-muted);
+    letter-spacing: .5px; transition: .15s;
+}
+#newsLabel.active { border-color: var(--yellow); color: var(--yellow); }
+.hdr-btn {
+    font-size: 11px; font-weight: 500;
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid var(--border-default);
+    border-radius: var(--r);
+    color: var(--text-secondary);
+    letter-spacing: .5px;
+    transition: .15s;
+}
+.hdr-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── News banner ──────────────────────────────────────────── */
+#newsBanner {
+    display: none;
+    background: rgba(255,183,77,.06);
+    border-bottom: 1px solid rgba(255,183,77,.2);
+    padding: 7px 16px;
+    font-size: 11px; letter-spacing: .8px; color: var(--yellow);
+    text-align: center;
+}
+
+/* ── Layout grid ──────────────────────────────────────────── */
+.layout {
+    display: grid;
+    grid-template-columns: 256px 1fr 292px;
+    grid-template-areas: "indicators signal history";
+    gap: 12px;
+    padding: 12px 16px;
+    align-items: start;
+}
+@media (max-width: 1279px) {
+    .layout {
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas:
+            "signal signal"
+            "indicators history";
+    }
+}
+@media (max-width: 767px) {
+    .layout {
+        grid-template-columns: 1fr;
+        grid-template-areas: "signal" "indicators" "history";
+    }
+}
+.col-indicators { grid-area: indicators; }
+.col-signal     { grid-area: signal; }
+.col-history    { grid-area: history; }
+
+/* ── Panel base ───────────────────────────────────────────── */
+.panel {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r);
+    overflow: hidden;
+}
+.panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 11px; font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+/* ── Signal card ──────────────────────────────────────────── */
+.sig-body { padding: 20px 20px 16px; }
+
+#sigStatus {
+    font-family: var(--font-ui);
+    font-size: 28px; font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+#sigStatus.buy  { color: var(--green); font-size: 32px; }
+#sigStatus.sell { color: var(--red);   font-size: 32px; }
+#sigStatus.blocked { color: var(--yellow); font-size: 20px; }
+
+.sig-sub {
+    font-size: 11px; font-weight: 500; letter-spacing: 1px;
+    color: var(--text-secondary); margin-bottom: 16px;
+    text-transform: uppercase;
+}
+
+/* Score progress bar (WAITING state) */
+.score-bar-wrap {
+    height: 3px; background: var(--border-default);
+    border-radius: 2px; margin-bottom: 8px;
+    overflow: hidden;
+}
+.score-bar-fill {
+    height: 100%; border-radius: 2px;
+    background: var(--accent);
+    transition: width .3s;
+}
+.score-legend {
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* Entry decision table */
+.entry-tbl {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 0;
+    margin-top: 16px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--r);
+    overflow: hidden;
+}
+.entry-tbl .et-row {
+    display: contents;
+}
+.entry-tbl .et-label,
+.entry-tbl .et-val {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 12px;
+}
+.entry-tbl .et-row:last-child .et-label,
+.entry-tbl .et-row:last-child .et-val { border-bottom: none; }
+.et-label { color: var(--text-muted); font-size: 11px; letter-spacing: .5px; text-transform: uppercase; }
+.et-val   { font-family: var(--font-mono); font-feature-settings:"tnum" 1; font-weight: 600; color: var(--text-primary); }
+.et-val.tp { color: var(--green); }
+.et-val.sl { color: var(--red); }
+.et-val.rr { color: var(--accent); }
+.et-val.wr { color: var(--yellow); }
+.entry-tbl .et-full { grid-column: 1 / -1; }
+
+/* Signal card border states */
+.panel.sig-state-buy     { border-color: rgba(38,166,154,.4); }
+.panel.sig-state-sell    { border-color: rgba(239,83,80,.4); }
+.panel.sig-state-blocked { border-color: rgba(255,183,77,.4); }
+.panel.sig-state-waiting { border-color: var(--border-default); }
+
+/* Blocked reason */
+.blocked-reason {
+    font-size: 12px; color: var(--yellow);
+    margin-top: 8px; line-height: 1.6;
+}
+
+/* Stats row below signal */
+.stats-row {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--border-subtle);
+}
+.stat-item {
+    padding: 10px 14px;
+    border-right: 1px solid var(--border-subtle);
+}
+.stat-item:last-child { border-right: none; }
+.stat-label { font-size: 10px; color: var(--text-muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 3px; }
+.stat-val   { font-family: var(--font-mono); font-feature-settings:"tnum" 1; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.stat-val.up  { color: var(--green); }
+.stat-val.dn  { color: var(--red); }
+@media (max-width: 767px) { .stats-row { grid-template-columns: repeat(2,1fr); } }
+
+/* ── Indicator panel ──────────────────────────────────────── */
+.ind-section { padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); }
+.ind-section:last-child { border-bottom: none; }
+.ind-section-label {
+    font-size: 10px; font-weight: 600; color: var(--text-muted);
+    letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px;
+}
+
+/* Score pills */
+.pills-wrap { display: flex; flex-wrap: wrap; gap: 5px; }
+.pill {
+    font-family: var(--font-mono); font-size: 11px;
+    padding: 3px 8px; border-radius: 4px;
+    border: 1px solid var(--border-default);
+    color: var(--text-muted); background: transparent;
+    white-space: nowrap;
+}
+.pill.active { border-color: var(--accent); color: var(--accent); background: rgba(41,98,255,.08); }
+.pill.v-bonus { border-color: var(--green); color: var(--green); background: rgba(38,166,154,.08); }
+
+/* Vote total */
+.vote-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vote-tag {
+    font-family: var(--font-mono); font-size: 11px;
+    padding: 2px 6px; border-radius: 3px;
+    background: var(--bg-hover); color: var(--text-secondary);
+}
+.vote-sum { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+.vote-sum.buy  { color: var(--green); }
+.vote-sum.sell { color: var(--red); }
+.vote-sum.neu  { color: var(--text-muted); }
+
+/* Collapsible detail toggle */
+.expand-btn {
+    font-size: 11px; font-weight: 500; letter-spacing: .5px;
+    color: var(--accent); background: transparent; border: none;
+    padding: 0; text-transform: uppercase;
+}
+.expand-btn:hover { opacity: .75; }
+
+/* Indicator detail (expanded) */
+.ind-detail-row {
+    display: grid; grid-template-columns: 72px 1fr 60px;
+    gap: 4px; padding: 4px 0;
+    border-bottom: 1px solid var(--border-subtle);
+    align-items: center; font-size: 11.5px;
+}
+.ind-detail-row:last-child { border-bottom: none; }
+.idr-name  { color: var(--text-muted); letter-spacing: .3px; }
+.idr-val   { font-family: var(--font-mono); font-feature-settings:"tnum" 1; color: var(--text-secondary); }
+.idr-vote  { font-family: var(--font-mono); font-weight: 600; text-align: right; }
+.idr-vote.p { color: var(--green); }
+.idr-vote.n { color: var(--red); }
+.idr-vote.z { color: var(--text-muted); }
+
+/* Mini bar */
+.mini-bar-wrap { height: 2px; background: var(--border-default); border-radius: 1px; margin-top: 3px; overflow: hidden; }
+.mini-bar-fill { height: 100%; border-radius: 1px; }
+
+/* ── History panel ─────────────────────────────────────────── */
+.hist-row {
+    display: grid;
+    grid-template-columns: 22px 40px 36px 1fr 68px;
+    gap: 6px; align-items: center;
+    padding: 0 14px;
+    height: 32px;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 11.5px;
+}
+.hist-row:last-child { border-bottom: none; }
+.hist-row:hover { background: var(--bg-hover); }
+.hist-hdr {
+    font-size: 10px; font-weight: 600; color: var(--text-muted);
+    letter-spacing: .8px; text-transform: uppercase; height: 28px;
+}
+.h-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.h-dot.win  { background: var(--green); }
+.h-dot.loss { background: var(--red); }
+.h-dot.open { background: var(--text-muted); border: 1px solid var(--text-secondary); background: transparent; }
+.h-dir  { font-weight: 600; font-size: 11px; }
+.h-dir.buy  { color: var(--green); }
+.h-dir.sell { color: var(--red); }
+.h-score { font-family: var(--font-mono); color: var(--accent); font-size: 11.5px; }
+.h-price { font-family: var(--font-mono); font-feature-settings:"tnum" 1; color: var(--text-secondary); font-size: 11px; }
+.h-time  { font-size: 10.5px; color: var(--text-muted); text-align: right; font-family: var(--font-mono); }
+.empty-hist { padding: 24px 14px; font-size: 12px; color: var(--text-muted); letter-spacing: .3px; }
+
+/* Clear button */
+.btn-clear {
+    font-size: 10px; font-weight: 500; letter-spacing: .5px;
+    padding: 2px 7px; border-radius: 3px;
+    border: 1px solid var(--border-default);
+    background: transparent; color: var(--text-muted);
+    text-transform: uppercase;
+}
+.btn-clear:hover { border-color: var(--red); color: var(--red); }
+
+/* ── Footer status bar ─────────────────────────────────────── */
+footer {
+    border-top: 1px solid var(--border-default);
+    background: var(--bg-elevated);
+    padding: 6px 16px;
+    display: flex; align-items: center; gap: 16px;
+    font-size: 11px; color: var(--text-muted);
+    position: sticky; bottom: 0;
+}
+.sf-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.sf-dot.ok  { background: var(--green); }
+.sf-dot.err { background: var(--red); }
+.sf-dot.loading { background: var(--yellow); }
+.sf-sep { color: var(--border-default); }
+#sfWinRate { font-family: var(--font-mono); }
+#sfUpdate  { margin-left: auto; }
+</style>
+</head>
+<body>
+<!-- ── Header ────────────────────────────────────────────── -->
+<header>
+    <div class="hdr-l">
+        <span class="logo"><em>BTC</em>/USD</span>
+        <span class="pair-meta">· Kraken · 15m</span>
+    </div>
+    <div class="hdr-c">
+        <span id="tb-price" class="mono">--</span>
+        <span id="tb-change" class="chg-badge">--</span>
+    </div>
+    <div class="hdr-r">
+        <span class="hdr-countdown">
+            <span id="nextTicker">--s</span> · <span id="nextSignal">--s</span>
+        </span>
+        <label class="news-toggle-wrap" title="消息面模式">
+            <input type="checkbox" id="newsToggle" onchange="onNewsToggle()">
+            <span id="newsLabel">NEWS OFF</span>
+        </label>
+        <button class="hdr-btn" onclick="runSignal()">↻ REFRESH</button>
+    </div>
+</header>
+
+<!-- ── News banner ─────────────────────────────────────────── -->
+<div id="newsBanner">⚠ NEWS MODE ON — ALL SIGNALS SUPPRESSED</div>
+
+<!-- ── 3-column layout ─────────────────────────────────────── -->
+<div class="layout">
+
+    <!-- LEFT: Indicators ──────────────────────────────────── -->
+    <aside class="panel col-indicators">
+        <div class="panel-header">Indicators</div>
+
+        <div class="ind-section">
+            <div class="ind-section-label">Score</div>
+            <div class="pills-wrap" id="scorePills"></div>
+        </div>
+
+        <div class="ind-section">
+            <div class="ind-section-label">Vote</div>
+            <div class="vote-row" id="voteRow"></div>
+        </div>
+
+        <div class="ind-section">
+            <button class="expand-btn" id="expandBtn" onclick="toggleDetail()">▸ Detail</button>
+        </div>
+
+        <div class="ind-section" id="indicatorDetail" style="display:none">
+            <div id="detailRows"></div>
+        </div>
+    </aside>
+
+    <!-- CENTER: Signal ─────────────────────────────────────── -->
+    <section class="panel col-signal">
+        <div class="panel-header">Signal</div>
+        <div class="sig-body">
+            <div id="sigStatus">WAITING</div>
+            <div id="sigSub" class="sig-sub"></div>
+            <div id="scoreBarWrap" class="score-bar-wrap">
+                <div class="score-bar-fill" id="scoreBarFill" style="width:0%"></div>
+            </div>
+            <div id="scoreLegend" class="score-legend"></div>
+            <div id="blockedReason" class="blocked-reason" style="display:none"></div>
+            <div id="entryTable" class="entry-tbl" style="display:none"></div>
+        </div>
+        <div class="stats-row">
+            <div class="stat-item">
+                <div class="stat-label">24H High</div>
+                <div class="stat-val up" id="high24">--</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">24H Low</div>
+                <div class="stat-val dn" id="low24">--</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Volume</div>
+                <div class="stat-val" id="vol24">--</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">VWAP</div>
+                <div class="stat-val" id="vwap24">--</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- RIGHT: History ─────────────────────────────────────── -->
+    <aside class="panel col-history">
+        <div class="panel-header">
+            History
+            <button class="btn-clear" onclick="clearHistory()">Clear</button>
+        </div>
+        <div class="hist-row hist-hdr">
+            <span></span>
+            <span>Dir</span>
+            <span>Score</span>
+            <span>Price</span>
+            <span style="text-align:right">Time</span>
+        </div>
+        <div id="histList"><div class="empty-hist">No signals yet</div></div>
+    </aside>
+
+</div>
+
+<!-- ── Footer status bar ───────────────────────────────────── -->
+<footer>
+    <span class="sf-dot" id="sfDot"></span>
+    <span id="sfConn">Connecting…</span>
+    <span class="sf-sep">|</span>
+    <span id="sfWinRate">—</span>
+    <span id="sfUpdate" style="margin-left:auto">—</span>
+</footer>
+
+<script>
+'use strict';
+
+/* ================================================================
+   CONFIG
+   ================================================================ */
+const CONFIG = {
+    pair:            'XBTUSD',
+    KRAKEN_REST:     'https://api.kraken.com/0/public',
+    RSI_PERIOD:      14,
+    BB_PERIOD:       20,
+    BB_STD:           2,
+    EMA_SHORT:       20,
+    EMA_LONG:        50,
+    VOL_PERIOD:      20,
+    INTERVAL_15M:    15,
+    SIG_THRESHOLD:   70,
+    STOP_LOSS_PCT:   0.015,
+    TAKE_PROFIT_PCT: 0.020,
+};
+
+const TICKER_INTERVAL = 5;
+const SIGNAL_INTERVAL = 30;
+const HISTORY_KEY     = 'btc_signal_history';
+
+let newsMode        = false;
+let tickerCountdown = TICKER_INTERVAL;
+let signalCountdown = SIGNAL_INTERVAL;
+let detailOpen      = false;
+
+/* ================================================================
+   FORMATTERS
+   ================================================================ */
+function fmtUSD(n) {
+    return '$' + parseFloat(n).toLocaleString('en-US',
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtVol(v) {
+    v = parseFloat(v);
+    return v >= 1e4 ? (v / 1e3).toFixed(1) + 'K' : v.toFixed(2);
+}
+function relativeTime(ts) {
+    const m = Math.floor((Date.now() - ts) / 60000);
+    if (m < 1)  return 'just now';
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+}
+function flash(el) {
+    if (!el) return;
+    el.classList.remove('flashing');
+    void el.offsetWidth;
+    el.classList.add('flashing');
+}
+
+/* ================================================================
+   NEWS MODE
+   ================================================================ */
+function onNewsToggle() {
+    newsMode = document.getElementById('newsToggle').checked;
+    const lbl = document.getElementById('newsLabel');
+    lbl.textContent = newsMode ? 'NEWS ON' : 'NEWS OFF';
+    lbl.classList.toggle('active', newsMode);
+    document.getElementById('newsBanner').style.display = newsMode ? 'block' : 'none';
+    if (!newsMode) runSignal();
+    else renderSignalCard(null);
+}
+
+/* ================================================================
+   INDICATOR DETAIL TOGGLE
+   ================================================================ */
+function toggleDetail() {
+    detailOpen = !detailOpen;
+    document.getElementById('indicatorDetail').style.display = detailOpen ? 'block' : 'none';
+    document.getElementById('expandBtn').textContent = (detailOpen ? '▾' : '▸') + ' Detail';
+}
+
+/* ================================================================
+   KRAKEN TICKER (5s) — price display only
+   ================================================================ */
+async function fetchTicker() {
+    const dot  = document.getElementById('sfDot');
+    const conn = document.getElementById('sfConn');
+    dot.className = 'sf-dot loading';
+
+    try {
+        const res  = await fetch(CONFIG.KRAKEN_REST + '/Ticker?pair=' + CONFIG.pair);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const json = await res.json();
+        if (json.error && json.error.length) throw new Error(json.error[0]);
+
+        const t      = json.result['XXBTZUSD'];
+        if (!t) throw new Error('no data');
+
+        const price  = parseFloat(t.c[0]);
+        const open   = parseFloat(t.o);
+        const high   = parseFloat(t.h[1]);
+        const low    = parseFloat(t.l[1]);
+        const vol    = parseFloat(t.v[1]);
+        const vwap   = parseFloat(t.p[1]);
+        const bid    = parseFloat(t.b[0]);
+        const ask    = parseFloat(t.a[0]);
+        const pct    = (price - open) / open * 100;
+
+        const priceEl = document.getElementById('tb-price');
+        const prev    = parseFloat(priceEl.dataset.last || 0);
+        priceEl.textContent  = fmtUSD(price);
+        priceEl.dataset.last = price;
+        if (prev && price !== prev) flash(priceEl);
+
+        const badge = document.getElementById('tb-change');
+        badge.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+        badge.className   = 'chg-badge ' + (pct > 0 ? 'up' : pct < 0 ? 'down' : '');
+
+        document.getElementById('high24').textContent = fmtUSD(high);
+        document.getElementById('low24').textContent  = fmtUSD(low);
+        document.getElementById('vol24').textContent  = fmtVol(vol) + ' BTC';
+        document.getElementById('vwap24').textContent = fmtUSD(vwap);
+
+        updateOpenSignals(price);
+
+        dot.className    = 'sf-dot ok';
+        conn.textContent = 'Kraken · bid ' + bid.toFixed(0) + ' / ask ' + ask.toFixed(0);
+        document.getElementById('sfUpdate').textContent =
+            'Updated ' + new Date().toLocaleTimeString('en-US', { hour12: false });
+
+    } catch (err) {
+        dot.className    = 'sf-dot err';
+        conn.textContent = 'Error: ' + err.message;
+    }
+}
+
+/* ================================================================
+   KRAKEN OHLC (30s) — signal engine data
+   ================================================================ */
+async function fetchOHLC(interval) {
+    const url  = CONFIG.KRAKEN_REST + '/OHLC?pair=' + CONFIG.pair + '&interval=' + interval;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.error && data.error.length) throw new Error(data.error[0]);
+    const raw = data.result[CONFIG.pair] || data.result['XXBTZUSD'];
+    return raw.map(c => ({
+        time:   c[0] * 1000,
+        open:   parseFloat(c[1]),
+        high:   parseFloat(c[2]),
+        low:    parseFloat(c[3]),
+        close:  parseFloat(c[4]),
+        volume: parseFloat(c[6]),
+    }));
+}
+
+/* ================================================================
+   RSI — Wilder smoothing  (Jesse: jesse/indicators/rsi.py)
+   ================================================================ */
+function calcRSI(closes, period) {
+    period = period || CONFIG.RSI_PERIOD;
+    if (closes.length < period + 1) return null;
+    let avgGain = 0, avgLoss = 0;
+    for (let i = 1; i <= period; i++) {
+        const d = closes[i] - closes[i - 1];
+        if (d > 0) avgGain += d; else avgLoss += Math.abs(d);
+    }
+    avgGain /= period; avgLoss /= period;
+    for (let i = period + 1; i < closes.length; i++) {
+        const d = closes[i] - closes[i - 1];
+        avgGain = (avgGain * (period - 1) + (d > 0 ? d : 0))           / period;
+        avgLoss = (avgLoss * (period - 1) + (d < 0 ? Math.abs(d) : 0)) / period;
+    }
+    if (avgLoss === 0) return 100;
+    return 100 - (100 / (1 + avgGain / avgLoss));
+}
+
+/* Jesse: jesse/indicators/bollinger_bands.py */
+function calcBB(closes, period, mult) {
+    period = period || CONFIG.BB_PERIOD; mult = mult || CONFIG.BB_STD;
+    if (closes.length < period) return null;
+    const slice  = closes.slice(-period);
+    const middle = slice.reduce((s, v) => s + v, 0) / period;
+    const std    = Math.sqrt(slice.reduce((s, v) => s + (v - middle) ** 2, 0) / period);
+    const upper  = middle + mult * std;
+    const lower  = middle - mult * std;
+    const last   = closes[closes.length - 1];
+    const pct    = upper !== lower ? (last - lower) / (upper - lower) : 0.5;
+    const width  = middle !== 0   ? (upper - lower) / middle          : 0;
+    return { upper, middle, lower, pct, width };
+}
+
+/* Jesse: jesse/indicators/ema.py */
+function calcEMA(closes, period) {
+    if (closes.length < period) return closes[closes.length - 1];
+    const k = 2 / (period + 1);
+    let ema = closes.slice(0, period).reduce((s, v) => s + v, 0) / period;
+    for (let i = period; i < closes.length; i++) ema = closes[i] * k + ema * (1 - k);
+    return ema;
+}
+
+/* Jesse: jesse/indicators/vwap.py — daily reset */
+function calcVWAP(candles) {
+    if (!candles || !candles.length) return null;
+    const now   = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    let cumVP = 0, cumV = 0;
+    for (const c of candles) {
+        if (c.time < today) continue;
+        const tp = (c.high + c.low + c.close) / 3;
+        cumVP += tp * c.volume; cumV += c.volume;
+    }
+    return cumV > 0 ? cumVP / cumV : null;
+}
+
+function calcVolRatio(volumes, period) {
+    period = period || CONFIG.VOL_PERIOD;
+    if (volumes.length < period + 1) return 1;
+    const avg = volumes.slice(-period - 1, -1).reduce((s, v) => s + v, 0) / period;
+    return avg > 0 ? volumes[volumes.length - 1] / avg : 1;
+}
+
+/* ReinforcedQuickie: MFI */
+function calcMFI(candles, period) {
+    period = period || 14;
+    if (candles.length < period + 1) return 50;
+    const slice = candles.slice(-(period + 1));
+    let pos = 0, neg = 0;
+    for (let i = 1; i <= period; i++) {
+        const tp  = (slice[i].high   + slice[i].low   + slice[i].close)   / 3;
+        const tpP = (slice[i-1].high + slice[i-1].low + slice[i-1].close) / 3;
+        const mf  = tp * slice[i].volume;
+        if      (tp > tpP) pos += mf;
+        else if (tp < tpP) neg += mf;
+    }
+    if (neg === 0) return 100;
+    return 100 - 100 / (1 + pos / neg);
+}
+
+/* ReinforcedQuickie: V-bottom — 5 declining bars then upturn */
+function detectVBottom(candles) {
+    if (candles.length < 6) return false;
+    const avg = candles.slice(-6).map(c => (c.open + c.high + c.low + c.close) / 4);
+    for (let i = 0; i < 4; i++) if (avg[i] <= avg[i + 1]) return false;
+    return avg[5] > avg[4];
+}
+
+/* ── Scoring  (Freqtrade trigger structure) ──────────────── */
+function scoreRSI(rsi) {
+    if (rsi === null) return { score: 0, vote: 0 };
+    let score = 0, vote = 0;
+    if      (rsi <= 20) { score = 25; vote = +1; }
+    else if (rsi <= 30) { score = 20; vote = +1; }
+    else if (rsi <= 38) { score = 10; vote = +1; }
+    else if (rsi <= 45) { score =  4; vote = +1; }
+    else if (rsi <  55) { score =  0; vote =  0; }
+    else if (rsi <  62) { score =  4; vote = -1; }
+    else if (rsi <  70) { score = 10; vote = -1; }
+    else if (rsi <  80) { score = 20; vote = -1; }
+    else                { score = 25; vote = -1; }
+    return { score, vote };
+}
+function scoreBB(pct) {
+    let score = 0, vote = 0;
+    if      (pct <= 0)    { score = 25; vote = +1; }
+    else if (pct <= 0.1)  { score = 22; vote = +1; }
+    else if (pct <= 0.2)  { score = 16; vote = +1; }
+    else if (pct <= 0.35) { score =  7; vote = +1; }
+    else if (pct <= 0.65) { score =  0; vote =  0; }
+    else if (pct <= 0.8)  { score =  7; vote = -1; }
+    else if (pct <= 0.9)  { score = 16; vote = -1; }
+    else if (pct <= 1.0)  { score = 22; vote = -1; }
+    else                  { score = 25; vote = -1; }
+    return { score, vote };
+}
+function scoreVWAP(devPct) {
+    const abs = Math.abs(devPct);
+    let score = 0;
+    if      (abs >= 2.0) score = 25;
+    else if (abs >= 1.2) score = 20;
+    else if (abs >= 0.6) score = 14;
+    else if (abs >= 0.3) score =  7;
+    else                 score =  2;
+    return { score, vote: devPct < 0 ? +1 : devPct > 0 ? -1 : 0 };
+}
+/* ReinforcedQuickie: MFI replaces raw volume ratio */
+function scoreMFI(mfi) {
+    let score = 0, vote = 0;
+    if      (mfi <= 20) { score = 25; vote = +1; }
+    else if (mfi <= 30) { score = 20; vote = +1; }
+    else if (mfi <= 38) { score = 10; vote = +1; }
+    else if (mfi <= 45) { score =  4; vote = +1; }
+    else if (mfi <  55) { score =  0; vote =  0; }
+    else if (mfi <  62) { score =  4; vote = -1; }
+    else if (mfi <  70) { score = 10; vote = -1; }
+    else if (mfi <  80) { score = 20; vote = -1; }
+    else                { score = 25; vote = -1; }
+    return { score, vote };
+}
+
+/* ── Risk manager  (Freqtrade EMA trend filter) ──────────── */
+function riskCheck(direction, ema20, ema50) {
+    if (newsMode)                               return { pass: false, reason: 'News mode active' };
+    if (direction === 'BUY'  && ema20 < ema50)  return { pass: false, reason: 'EMA20 < EMA50 — bearish trend, long blocked' };
+    if (direction === 'SELL' && ema20 > ema50)  return { pass: false, reason: 'EMA20 > EMA50 — bullish trend, short blocked' };
+    return { pass: true, reason: 'OK' };
+}
+
+/* ── Signal engine ───────────────────────────────────────── */
+function generateSignal(closes, candles, volumes) {
+    const last     = closes[closes.length - 1];
+    const rsi      = calcRSI(closes);
+    const bb       = calcBB(closes);
+    const vwap     = calcVWAP(candles);
+    const ema20    = calcEMA(closes, CONFIG.EMA_SHORT);
+    const ema50    = calcEMA(closes, CONFIG.EMA_LONG);
+    const volRatio = calcVolRatio(volumes);
+    const mfi      = calcMFI(candles);
+
+    const volAvg30 = volumes.length >= 31
+        ? volumes.slice(-31, -1).reduce((s, v) => s + v, 0) / 30 : 0;
+    const volSpike = volAvg30 > 0 && volumes[volumes.length - 1] > volAvg30 * 20;
+
+    const rsiR  = scoreRSI(rsi);
+    const bbR   = scoreBB(bb ? bb.pct : 0.5);
+    const vwapR = vwap ? scoreVWAP((last - vwap) / vwap * 100) : { score: 0, vote: 0 };
+    const mfiR  = scoreMFI(mfi);
+
+    const vBottom    = detectVBottom(candles);
+    const vBonus     = vBottom ? 10 : 0;
+    const baseScore  = rsiR.score + bbR.score + vwapR.score + mfiR.score;
+    const totalScore = Math.min(100, baseScore + vBonus);
+
+    const votes     = rsiR.vote + bbR.vote + vwapR.vote + mfiR.vote;
+    const direction = votes > 0 ? 'BUY' : votes < 0 ? 'SELL' : 'NEUTRAL';
+
+    const risk = volSpike
+        ? { pass: false, reason: 'Vol spike >20× avg — manipulation filter' }
+        : riskCheck(direction, ema20, ema50);
+
+    const strength  = totalScore >= 85 ? 'STRONG SIGNAL' : totalScore >= CONFIG.SIG_THRESHOLD ? 'SIGNAL' : 'BELOW THRESHOLD';
+    const stopLong  = (last * (1 - CONFIG.STOP_LOSS_PCT)).toFixed(2);
+    const stopShort = (last * (1 + CONFIG.STOP_LOSS_PCT)).toFixed(2);
+
+    return {
+        score: totalScore, direction, strength, risk,
+        scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, mfi: mfiR.score, vBonus },
+        votes:  { rsi: rsiR.vote,  bb: bbR.vote,  vwap: vwapR.vote,  mfi: mfiR.vote  },
+        raw:    { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last },
+        stopLong, stopShort,
+    };
+}
+
+/* ================================================================
+   HISTORY  (localStorage, max 50)
+   ================================================================ */
+function loadHistory()     { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } }
+function saveHistory(list) { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(-50))); }
+
+function logSignal(sig) {
+    if (sig.score < CONFIG.SIG_THRESHOLD || !sig.risk.pass) return;
+    const history = loadHistory();
+    const last    = history[history.length - 1];
+    const now     = Date.now();
+    if (last && last.direction === sig.direction && (now - last.ts) < 30 * 60 * 1000) return;
+    const { rsi, bb, ema20, ema50, last: price } = sig.raw;
+    history.push({
+        ts:        now,
+        time:      new Date(now).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
+        direction: sig.direction,
+        strength:  sig.strength,
+        score:     sig.score,
+        price:     price.toFixed(2),
+        stop:      sig.direction === 'BUY' ? sig.stopLong : sig.stopShort,
+        bbTarget:  bb ? parseFloat(bb.middle.toFixed(2)) : null,
+        rsi:       rsi ? rsi.toFixed(1) : '--',
+        bbPct:     bb  ? (bb.pct * 100).toFixed(1) + '%' : '--',
+        emaTrend:  ema20 > ema50 ? 'bull' : 'bear',
+        outcome:   null,
+    });
+    saveHistory(history);
+}
+
+function updateOpenSignals(currentPrice) {
+    const history = loadHistory();
+    let changed = false;
+    for (const h of history) {
+        if (h.outcome) continue;
+        const sl = parseFloat(h.stop);
+        const tp = h.bbTarget != null ? parseFloat(h.bbTarget) : null;
+        if (tp == null) continue;
+        if (h.direction === 'BUY') {
+            if (currentPrice <= sl)      { h.outcome = 'LOSS'; changed = true; }
+            else if (currentPrice >= tp) { h.outcome = 'WIN';  changed = true; }
+        } else {
+            if (currentPrice >= sl)      { h.outcome = 'LOSS'; changed = true; }
+            else if (currentPrice <= tp) { h.outcome = 'WIN';  changed = true; }
+        }
+    }
+    if (changed) { saveHistory(history); renderHistory(); renderStatusFooter(); }
+}
+
+function clearHistory() {
+    if (!confirm('Clear all signal history?')) return;
+    localStorage.removeItem(HISTORY_KEY);
+    renderHistory(); renderStatusFooter();
+}
+
+function renderHistory() {
+    const history = loadHistory();
+    const list    = document.getElementById('histList');
+
+    if (!history.length) {
+        list.innerHTML = '<div class="empty-hist">No signals yet</div>';
+        return;
+    }
+
+    const fmt = v => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 });
+
+    list.innerHTML = history.slice().reverse().map(h => {
+        const o    = h.outcome;
+        const dotCls = o === 'WIN' ? 'win' : o === 'LOSS' ? 'loss' : 'open';
+        const dirCls = h.direction === 'BUY' ? 'buy' : 'sell';
+        const dirTxt = h.direction === 'BUY' ? '▲ BUY' : '▼ SELL';
+        return '<div class="hist-row">'
+            + '<span class="h-dot ' + dotCls + '"></span>'
+            + '<span class="h-dir ' + dirCls + '">' + dirTxt + '</span>'
+            + '<span class="h-score">' + h.score + '</span>'
+            + '<span class="h-price">' + fmt(h.price) + '</span>'
+            + '<span class="h-time">' + relativeTime(h.ts) + '</span>'
+            + '</div>';
+    }).join('');
+}
+
+function renderStatusFooter() {
+    const history  = loadHistory();
+    const resolved = history.filter(h => h.outcome === 'WIN' || h.outcome === 'LOSS');
+    const open     = history.filter(h => !h.outcome).length;
+    const wins     = resolved.filter(h => h.outcome === 'WIN').length;
+    const recent   = history.slice(-20).filter(h => h.outcome === 'WIN' || h.outcome === 'LOSS');
+    const recentW  = recent.filter(h => h.outcome === 'WIN').length;
+
+    const wr = document.getElementById('sfWinRate');
+    if (resolved.length >= 3) {
+        const total = (wins / resolved.length * 100).toFixed(0);
+        const r20   = recent.length >= 3
+            ? ' · L20: ' + (recentW / recent.length * 100).toFixed(0) + '%'
+            : '';
+        wr.textContent = 'W/R: ' + total + '% (' + wins + '/' + resolved.length + ')' + r20 + ' · Open: ' + open;
+    } else {
+        wr.textContent = 'W/R: — · Open: ' + open + ' · Need ≥3 resolved';
+    }
+}
+
+/* ================================================================
+   RENDER INDICATOR PANEL
+   ================================================================ */
+function renderIndicatorPanel(sig) {
+    if (!sig) return;
+    const { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last } = sig.raw;
+
+    // ── Score pills ───────────────────────────────────────────
+    const pillsWrap = document.getElementById('scorePills');
+    const pillDefs = [
+        { name: 'RSI',  score: sig.scores.rsi,  bonus: false },
+        { name: 'BB',   score: sig.scores.bb,   bonus: false },
+        { name: 'VWAP', score: sig.scores.vwap, bonus: false },
+        { name: 'MFI',  score: sig.scores.mfi,  bonus: false },
+    ];
+    if (sig.scores.vBonus) pillDefs.push({ name: 'V-BTM', score: sig.scores.vBonus, bonus: true });
+    pillsWrap.innerHTML = pillDefs.map(p => {
+        const cls = p.bonus ? 'pill v-bonus' : (p.score >= 10 ? 'pill active' : 'pill');
+        const lbl = p.bonus ? '+' + p.score : p.score + '/25';
+        return '<span class="' + cls + '">' + p.name + ' ' + lbl + '</span>';
+    }).join('');
+
+    // ── Vote row ──────────────────────────────────────────────
+    const voteRow = document.getElementById('voteRow');
+    const vs = sig.votes;
+    const tags = [
+        { name: 'RSI',  v: vs.rsi  },
+        { name: 'BB',   v: vs.bb   },
+        { name: 'VWAP', v: vs.vwap },
+        { name: 'MFI',  v: vs.mfi  },
+    ];
+    const total = vs.rsi + vs.bb + vs.vwap + vs.mfi;
+    const sumCls = total > 0 ? 'buy' : total < 0 ? 'sell' : 'neu';
+    const sumTxt = total > 0 ? '▲ BUY' : total < 0 ? '▼ SELL' : 'NEUTRAL';
+    voteRow.innerHTML = tags.map(t =>
+        '<span class="vote-tag">' + t.name + ' ' + (t.v > 0 ? '+1' : t.v < 0 ? '−1' : '0') + '</span>'
+    ).join('') + '<span class="vote-sum ' + sumCls + '">' + sumTxt + '</span>';
+
+    // ── Collapsible detail ────────────────────────────────────
+    if (!detailOpen) return;
+    const vwapDev = vwap ? ((last - vwap) / vwap * 100) : null;
+    const rows = [
+        { name: 'RSI(14)',  val: rsi ? rsi.toFixed(1) : '--',
+          sub: rsi < 30 ? 'OVERSOLD' : rsi > 70 ? 'OVERBOUGHT' : 'NEUTRAL',
+          vote: vs.rsi, bar: rsi / 100 },
+        { name: 'BB%',      val: bb ? (bb.pct * 100).toFixed(1) + '%' : '--',
+          sub: bb && bb.pct < 0.2 ? 'NEAR LOW' : bb && bb.pct > 0.8 ? 'NEAR HIGH' : 'MID',
+          vote: vs.bb, bar: bb ? bb.pct : 0.5 },
+        { name: 'VWAP dev', val: vwapDev != null ? (vwapDev > 0 ? '+' : '') + vwapDev.toFixed(2) + '%' : '--',
+          sub: vwap ? '$' + vwap.toFixed(0) : 'N/A',
+          vote: vs.vwap, bar: vwapDev != null ? Math.min(1, Math.abs(vwapDev) / 3) : 0 },
+        { name: 'MFI(14)',  val: mfi.toFixed(1),
+          sub: mfi < 30 ? 'OVERSOLD' : mfi > 70 ? 'OVERBOUGHT' : 'NEUTRAL',
+          vote: vs.mfi, bar: mfi / 100 },
+        { name: 'Vol ratio',val: volRatio.toFixed(2) + '×',
+          sub: volSpike ? 'SPIKE — BLOCKED' : volRatio >= 1.5 ? 'HIGH' : 'NORMAL',
+          vote: 0, bar: Math.min(1, volRatio / 3) },
+        { name: 'EMA 20/50',val: ema20.toFixed(0) + ' / ' + ema50.toFixed(0),
+          sub: ema20 > ema50 ? 'BULL' : 'BEAR',
+          vote: 0, bar: null },
+    ];
+    const barColor = score => score >= 60 ? 'var(--green)' : score >= 30 ? 'var(--accent)' : 'var(--text-muted)';
+    document.getElementById('detailRows').innerHTML = rows.map(r => {
+        const vc = r.vote > 0 ? 'p' : r.vote < 0 ? 'n' : 'z';
+        const vt = r.vote > 0 ? '+1' : r.vote < 0 ? '−1' : '0';
+        const barHtml = r.bar !== null
+            ? '<div class="mini-bar-wrap"><div class="mini-bar-fill" style="width:' + (r.bar * 100).toFixed(0) + '%;background:' + barColor(r.bar * 100) + '"></div></div>'
+            : '';
+        return '<div class="ind-detail-row">'
+            + '<span class="idr-name">' + r.name + '</span>'
+            + '<span class="idr-val">' + r.val + '<br><span style="color:var(--text-muted);font-size:10px">' + r.sub + '</span>' + barHtml + '</span>'
+            + '<span class="idr-vote ' + vc + '">' + vt + '</span>'
+            + '</div>';
+    }).join('');
+}
+
+/* ================================================================
+   RENDER SIGNAL CARD
+   ================================================================ */
+function renderSignalCard(sig) {
+    const statusEl = document.getElementById('sigStatus');
+    const subEl    = document.getElementById('sigSub');
+    const barFill  = document.getElementById('scoreBarFill');
+    const barWrap  = document.getElementById('scoreBarWrap');
+    const legend   = document.getElementById('scoreLegend');
+    const blocked  = document.getElementById('blockedReason');
+    const entryTbl = document.getElementById('entryTable');
+    const sigPanel = document.querySelector('.col-signal');
+
+    // Clear all state classes
+    sigPanel.classList.remove('sig-state-buy','sig-state-sell','sig-state-blocked','sig-state-waiting');
+
+    // News mode override
+    if (newsMode || !sig) {
+        sigPanel.classList.add('sig-state-waiting');
+        statusEl.className  = '';
+        statusEl.textContent = 'SUPPRESSED';
+        subEl.textContent    = newsMode ? 'NEWS MODE ACTIVE' : '';
+        barWrap.style.display = 'block';
+        barFill.style.width   = '0%';
+        legend.textContent    = '';
+        blocked.style.display = 'none';
+        entryTbl.style.display = 'none';
+        return;
+    }
+
+    const score         = sig.score;
+    const aboveThresh   = score >= CONFIG.SIG_THRESHOLD;
+    const isBlocked     = !sig.risk.pass;
+    const fmt           = v => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 });
+
+    barFill.style.width = Math.min(100, score) + '%';
+
+    if (isBlocked) {
+        // ── BLOCKED ─────────────────────────────────────────
+        sigPanel.classList.add('sig-state-blocked');
+        statusEl.className   = 'blocked';
+        statusEl.textContent = '⊘ BLOCKED';
+        subEl.textContent    = score + ' / 100 · ' + sig.direction;
+        barWrap.style.display = 'block';
+        legend.textContent    = sig.strength;
+        blocked.style.display = 'block';
+        blocked.textContent   = sig.risk.reason;
+        entryTbl.style.display = 'none';
+        return;
+    }
+
+    blocked.style.display = 'none';
+
+    if (!aboveThresh) {
+        // ── WAITING ──────────────────────────────────────────
+        sigPanel.classList.add('sig-state-waiting');
+        statusEl.className   = '';
+        statusEl.textContent = 'WAITING';
+        const tendTxt = sig.direction === 'NEUTRAL' ? 'NEUTRAL' : sig.direction + ' tendency';
+        subEl.textContent    = tendTxt;
+        barWrap.style.display = 'block';
+        legend.textContent    = score + ' / 100 — need ≥' + CONFIG.SIG_THRESHOLD;
+        entryTbl.style.display = 'none';
+        return;
+    }
+
+    // ── SIGNAL (BUY / SELL) ───────────────────────────────────
+    const isBuy = sig.direction === 'BUY';
+    sigPanel.classList.add(isBuy ? 'sig-state-buy' : 'sig-state-sell');
+    statusEl.className   = isBuy ? 'buy' : 'sell';
+    statusEl.textContent = isBuy ? '▲ BUY' : '▼ SELL';
+    flash(statusEl);
+    subEl.textContent    = sig.strength + ' · ' + score + ' / 100';
+    barWrap.style.display = 'none';
+    legend.textContent    = '';
+
+    const entryP    = sig.raw.last;
+    const stopPrice = isBuy ? sig.stopLong : sig.stopShort;
+    const bbMid     = sig.raw.bb ? sig.raw.bb.middle : null;
+    const tpFb      = isBuy
+        ? (entryP * (1 + CONFIG.TAKE_PROFIT_PCT)).toFixed(2)
+        : (entryP * (1 - CONFIG.TAKE_PROFIT_PCT)).toFixed(2);
+    const tpVal     = bbMid ? fmt(bbMid) : fmt(tpFb);
+    const tpSub     = bbMid ? ' <small style="color:var(--text-muted);font-weight:400">BB MID</small>' : '';
+    const rrRatio   = (CONFIG.TAKE_PROFIT_PCT / CONFIG.STOP_LOSS_PCT).toFixed(2);
+
+    const hist     = loadHistory();
+    const resolved = hist.filter(h => h.outcome === 'WIN' || h.outcome === 'LOSS');
+    const wins     = resolved.filter(h => h.outcome === 'WIN').length;
+    const wrVal    = resolved.length >= 3
+        ? (wins / resolved.length * 100).toFixed(0) + '% (' + wins + '/' + resolved.length + ')'
+        : resolved.length > 0 ? wins + '/' + resolved.length + ' (need more data)' : '—';
+
+    entryTbl.style.display = 'grid';
+    entryTbl.innerHTML =
+        row('ENTRY',         fmt(entryP),                       '')
+      + row('TARGET',        tpVal + tpSub,                     'tp')
+      + row('STOP LOSS',     fmt(stopPrice) + ' &nbsp;−' + (CONFIG.STOP_LOSS_PCT * 100).toFixed(1) + '%', 'sl')
+      + row('R : R RATIO',   rrRatio + ' : 1',                  'rr')
+      + (sig.raw.vBottom ? rowFull('V-BOTTOM', '+10 pts bonus', 'tp') : '')
+      + rowFull('WIN RATE', wrVal, 'wr');
+
+    function row(label, val, cls) {
+        return '<div class="et-row">'
+            + '<div class="et-label">' + label + '</div>'
+            + '<div class="et-val ' + cls + '">' + val + '</div>'
+            + '</div>';
+    }
+    function rowFull(label, val, cls) {
+        return '<div class="et-row">'
+            + '<div class="et-label et-full">' + label + '</div>'
+            + '<div class="et-val ' + cls + ' et-full">' + val + '</div>'
+            + '</div>';
+    }
+}
+
+/* ================================================================
+   MAIN SIGNAL RUN (every 30s)
+   ================================================================ */
+async function runSignal() {
+    try {
+        const candles = await fetchOHLC(CONFIG.INTERVAL_15M);
+        const closes  = candles.map(c => c.close);
+        const volumes = candles.map(c => c.volume);
+        const last    = closes[closes.length - 1];
+
+        updateOpenSignals(last);
+        const sig = generateSignal(closes, candles, volumes);
+        renderSignalCard(sig);
+        renderIndicatorPanel(sig);
+        logSignal(sig);
+        renderHistory();
+        renderStatusFooter();
+    } catch (err) {
+        document.getElementById('sfConn').textContent = 'OHLC error: ' + err.message;
+    }
+}
+
+/* ================================================================
+   DUAL TIMERS  5s ticker · 30s OHLC
+   ================================================================ */
+function startTimers() {
+    setInterval(() => {
+        tickerCountdown--;
+        document.getElementById('nextTicker').textContent = tickerCountdown + 's';
+        if (tickerCountdown <= 0) { tickerCountdown = TICKER_INTERVAL; fetchTicker(); }
+
+        signalCountdown--;
+        document.getElementById('nextSignal').textContent = signalCountdown + 's';
+        if (signalCountdown <= 0) { signalCountdown = SIGNAL_INTERVAL; runSignal(); }
+    }, 1000);
+}
+
+/* ================================================================
+   BOOT
+   ================================================================ */
+fetchTicker();
+runSignal();
+renderHistory();
+renderStatusFooter();
+startTimers();</script>
+</body>
+</html>

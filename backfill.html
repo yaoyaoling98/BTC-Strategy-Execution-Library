@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>BTC信号历史回放 — localStorage冷启动工具</title>
+<style>
+  body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:24px; max-width:900px; margin:0 auto; }
+  h2   { color:#f7931a; margin-bottom:4px; }
+  p    { color:#8b949e; margin:4px 0 16px; }
+  .row { display:flex; gap:12px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+  select,button { background:#161b22; color:#c9d1d9; border:1px solid #30363d; padding:8px 14px;
+                  border-radius:6px; cursor:pointer; font-size:13px; }
+  button:hover  { background:#21262d; }
+  button.primary{ background:#f7931a; color:#000; font-weight:700; border-color:#f7931a; }
+  button.green  { background:#26a69a; color:#fff; border-color:#26a69a; }
+  #log  { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px;
+          min-height:200px; white-space:pre-wrap; font-size:12px; line-height:1.6;
+          max-height:400px; overflow-y:auto; }
+  #json-out { width:100%; background:#161b22; border:1px solid #30363d; border-radius:8px;
+              padding:12px; font-size:11px; color:#8b949e; min-height:100px;
+              box-sizing:border-box; margin-top:12px; }
+  .ok  { color:#26a69a; } .err { color:#ef5350; } .warn { color:#f7931a; }
+  .num { color:#79c0ff; }
+</style>
+</head>
+<body>
+
+<h2>📊 BTC信号历史回放 — 冷启动工具</h2>
+<p>从 Kraken 拉取历史K线，用当前策略逻辑回放信号，自动判定胜负，写入 localStorage</p>
+
+<div class="row">
+  <label>回溯天数：</label>
+  <select id="days">
+    <option value="30">30天（≈2880根K线，预计3-8笔信号）</option>
+    <option value="60">60天（≈5760根，预计6-15笔）</option>
+    <option value="90" selected>90天（≈8640根，预计10-25笔，推荐）</option>
+  </select>
+  <button class="primary" onclick="startBackfill()">▶ 开始回放</button>
+  <button onclick="clearLog()">清空日志</button>
+</div>
+
+<div id="log">点击"开始回放"拉取数据并运行策略回放...</div>
+
+<div id="output-area" style="display:none">
+  <div class="row" style="margin-top:16px">
+    <button class="green" onclick="injectToStorage()">💾 直接写入 localStorage（当前页面）</button>
+    <button onclick="copyJson()">📋 复制 JSON</button>
+    <span id="copy-tip" style="color:#26a69a;display:none">✓ 已复制</span>
+  </div>
+  <textarea id="json-out" readonly placeholder="回放完成后这里会显示 JSON..."></textarea>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════
+   配置（与 btc-signal-v2.html 保持一致）
+   ════════════════════════════════════════════════════════════ */
+const CFG = {
+  RSI_PERIOD:      14,
+  BB_PERIOD:       20,
+  BB_STD:           2,
+  EMA_SHORT:       20,
+  EMA_LONG:        50,
+  VOL_PERIOD:      20,
+  MFI_PERIOD:      14,
+  SIG_THRESHOLD:   70,
+  STOP_LOSS_PCT:  0.015,
+  TAKE_PROFIT_PCT:0.020,
+  EOD_HOUR_UTC:   22,
+  DEDUP_MINUTES:  30,   // 同方向30分钟内不重复入库
+};
+const HISTORY_KEY = 'btc_signal_history';
+const KRAKEN_URL  = 'https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=15';
+
+/* ════════════════════════════════════════════════════════════
+   Kraken 数据拉取（分页，最多720根/次）
+   ════════════════════════════════════════════════════════════ */
+async function fetchKrakenOHLC(sinceSec) {
+  const url = `${KRAKEN_URL}&since=${sinceSec}`;
+  const r = await fetch(url);
+  const d = await r.json();
+  if (d.error && d.error.length) throw new Error(d.error[0]);
+  const raw = d.result['XXBTZUSD'] || d.result['XBTUSD'];
+  // Kraken格式：[time, open, high, low, close, vwap, volume, count]
+  return raw.map(c => ({
+    time:   c[0] * 1000,
+    open:   parseFloat(c[1]),
+    high:   parseFloat(c[2]),
+    low:    parseFloat(c[3]),
+    close:  parseFloat(c[4]),
+    volume: parseFloat(c[6]),
+  }));
+}
+
+async function fetchAllCandles(days) {
+  const nowSec   = Math.floor(Date.now() / 1000);
+  const startSec = nowSec - days * 86400;
+  let   since    = startSec;
+  let   all      = [];
+  log(`正在拉取 Kraken 15m K线（过去 ${days} 天）...`);
+  while (true) {
+    const batch = await fetchKrakenOHLC(since);
+    if (!batch.length) break;
+    all = all.concat(batch);
+    log(`  已获取 ${all.length} 根...`);
+    const lastTime = batch[batch.length - 1].time / 1000;
+    if (lastTime >= nowSec - 900 || batch.length < 700) break;
+    since = lastTime + 1;
+    await sleep(300);  // Kraken 限速保护
+  }
+  // 去重排序
+  const seen = new Set();
+  all = all.filter(c => { const k = c.time; return seen.has(k) ? false : seen.add(k); });
+  all.sort((a, b) => a.time - b.time);
+  log(`数据拉取完成，共 ${all.length} 根 K线\n`);
+  return all;
+}
+
+/* ════════════════════════════════════════════════════════════
+   指标计算（与 btc-signal-v2.html 完全一致）
+   ════════════════════════════════════════════════════════════ */
+function calcRSI(closes, period = CFG.RSI_PERIOD) {
+  if (closes.length < period + 1) return null;
+  let ag = 0, al = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i-1];
+    if (d > 0) ag += d; else al += Math.abs(d);
+  }
+  ag /= period; al /= period;
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i-1];
+    ag = (ag * (period-1) + (d > 0 ? d : 0)) / period;
+    al = (al * (period-1) + (d < 0 ? Math.abs(d) : 0)) / period;
+  }
+  const rs = al === 0 ? 100 : ag / al;
+  return 100 - 100 / (1 + rs);
+}
+
+function calcBB(closes, period = CFG.BB_PERIOD, mult = CFG.BB_STD) {
+  if (closes.length < period) return null;
+  const sl  = closes.slice(-period);
+  const mid = sl.reduce((s, v) => s + v, 0) / period;
+  const std = Math.sqrt(sl.reduce((s, v) => s + (v - mid) ** 2, 0) / period);
+  const upper = mid + mult * std, lower = mid - mult * std;
+  const last  = closes[closes.length - 1];
+  const pct   = upper !== lower ? (last - lower) / (upper - lower) : 0.5;
+  return { upper, middle: mid, lower, pct };
+}
+
+function calcEMA(closes, period) {
+  if (closes.length < period) return closes[closes.length - 1];
+  const k = 2 / (period + 1);
+  let ema = closes.slice(0, period).reduce((s, v) => s + v, 0) / period;
+  for (let i = period; i < closes.length; i++) ema = closes[i] * k + ema * (1 - k);
+  return ema;
+}
+
+function calcVWAP(candles) {
+  const todayStart = (() => {
+    const last = new Date(candles[candles.length-1].time);
+    return new Date(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate()).getTime();
+  })();
+  let cv = 0, cv2 = 0;
+  for (const c of candles) {
+    if (c.time < todayStart) continue;
+    const tp = (c.high + c.low + c.close) / 3;
+    cv += tp * c.volume; cv2 += c.volume;
+  }
+  return cv2 > 0 ? cv / cv2 : null;
+}
+
+function calcMFI(candles, period = CFG.MFI_PERIOD) {
+  if (candles.length < period + 1) return 50;
+  const sl = candles.slice(-(period + 1));
+  let pos = 0, neg = 0;
+  for (let i = 1; i <= period; i++) {
+    const tp  = (sl[i].high   + sl[i].low   + sl[i].close)   / 3;
+    const tpP = (sl[i-1].high + sl[i-1].low + sl[i-1].close) / 3;
+    const mf  = tp * sl[i].volume;
+    if (tp > tpP) pos += mf; else if (tp < tpP) neg += mf;
+  }
+  return neg === 0 ? 100 : 100 - 100 / (1 + pos / neg);
+}
+
+function calcVolRatio(volumes, period = CFG.VOL_PERIOD) {
+  if (volumes.length < period + 1) return 1;
+  const avg = volumes.slice(-period-1, -1).reduce((s, v) => s + v, 0) / period;
+  return avg > 0 ? volumes[volumes.length-1] / avg : 1;
+}
+
+function detectVBottom(candles) {
+  if (candles.length < 6) return false;
+  const avg = candles.slice(-6).map(c => (c.open+c.high+c.low+c.close)/4);
+  for (let i = 0; i < 4; i++) if (avg[i] <= avg[i+1]) return false;
+  return avg[5] > avg[4];
+}
+
+/* ════════════════════════════════════════════════════════════
+   打分系统
+   ════════════════════════════════════════════════════════════ */
+function scoreRSI(v) {
+  if (v===null) return {score:0,vote:0};
+  if (v<=20) return {score:25,vote:+1}; if (v<=30) return {score:20,vote:+1};
+  if (v<=38) return {score:10,vote:+1}; if (v<=45) return {score:4,vote:+1};
+  if (v<55)  return {score:0,vote:0};
+  if (v<62)  return {score:4,vote:-1};  if (v<70)  return {score:10,vote:-1};
+  if (v<80)  return {score:20,vote:-1}; return {score:25,vote:-1};
+}
+function scoreBB(p) {
+  if (p<=0)   return {score:25,vote:+1}; if (p<=.1)  return {score:22,vote:+1};
+  if (p<=.2)  return {score:16,vote:+1}; if (p<=.35) return {score:7,vote:+1};
+  if (p<=.65) return {score:0,vote:0};
+  if (p<=.8)  return {score:7,vote:-1};  if (p<=.9)  return {score:16,vote:-1};
+  if (p<=1.0) return {score:22,vote:-1}; return {score:25,vote:-1};
+}
+function scoreVWAP(dev) {
+  const a=Math.abs(dev), v=dev<0?+1:dev>0?-1:0;
+  const s=a>=2?25:a>=1.2?20:a>=.6?14:a>=.3?7:2;
+  return {score:s,vote:v};
+}
+function scoreMFI(m) {
+  if (m<=20) return {score:25,vote:+1}; if (m<=30) return {score:20,vote:+1};
+  if (m<=38) return {score:10,vote:+1}; if (m<=45) return {score:4,vote:+1};
+  if (m<55)  return {score:0,vote:0};
+  if (m<62)  return {score:4,vote:-1};  if (m<70)  return {score:10,vote:-1};
+  if (m<80)  return {score:20,vote:-1}; return {score:25,vote:-1};
+}
+
+/* ════════════════════════════════════════════════════════════
+   信号生成（回放模式，无消息面过滤）
+   ════════════════════════════════════════════════════════════ */
+function generateSignalAt(candles, idx) {
+  const slice   = candles.slice(0, idx + 1);
+  const closes  = slice.map(c => c.close);
+  const volumes = slice.map(c => c.volume);
+  const last    = closes[closes.length - 1];
+
+  const rsi = calcRSI(closes);
+  const bb  = calcBB(closes);
+  const vwap= calcVWAP(slice);
+  const ema20 = calcEMA(closes, CFG.EMA_SHORT);
+  const ema50 = calcEMA(closes, CFG.EMA_LONG);
+  const mfi   = calcMFI(slice);
+  const volR  = calcVolRatio(volumes);
+
+  // 异常成交量硬过滤
+  const vol30avg = volumes.length >= 31
+    ? volumes.slice(-31,-1).reduce((s,v)=>s+v,0)/30 : 0;
+  if (vol30avg > 0 && volumes[volumes.length-1] > vol30avg * 20) return null;
+
+  const rsiR  = scoreRSI(rsi);
+  const bbR   = scoreBB(bb ? bb.pct : 0.5);
+  const vwapR = vwap ? scoreVWAP((last - vwap) / vwap * 100) : {score:0,vote:0};
+  const mfiR  = scoreMFI(mfi);
+  const vBonus = detectVBottom(slice) ? 10 : 0;
+  const total  = Math.min(100, rsiR.score + bbR.score + vwapR.score + mfiR.score + vBonus);
+
+  const votes = rsiR.vote + bbR.vote + vwapR.vote + mfiR.vote;
+  const dir   = votes > 0 ? 'BUY' : votes < 0 ? 'SELL' : null;
+  if (!dir || total < CFG.SIG_THRESHOLD) return null;
+
+  // EMA风控
+  if (dir === 'BUY'  && ema20 < ema50) return null;
+  if (dir === 'SELL' && ema20 > ema50) return null;
+
+  return {
+    direction: dir,
+    score:     total,
+    price:     last,
+    stop:      dir === 'BUY' ? last*(1-CFG.STOP_LOSS_PCT) : last*(1+CFG.STOP_LOSS_PCT),
+    bbTarget:  bb ? bb.middle : null,   // 快照！
+    strength:  total >= 85 ? '强信号' : '弱信号',
+    rsi:       rsi ? rsi.toFixed(1) : '--',
+    bbPct:     bb  ? (bb.pct*100).toFixed(1)+'%' : '--',
+    emaTrend:  ema20 > ema50 ? '多头' : '空头',
+  };
+}
+
+/* ════════════════════════════════════════════════════════════
+   胜负判定：扫描未来最多96根K线（1天）
+   ════════════════════════════════════════════════════════════ */
+function judgeOutcome(candles, entryIdx, sig) {
+  const sl = sig.stop;
+  const tp = sig.bbTarget;
+  const entryDate = new Date(candles[entryIdx].time).getUTCDate();
+
+  for (let i = entryIdx + 1; i < Math.min(entryIdx + 97, candles.length); i++) {
+    const c  = candles[i];
+    const dt = new Date(c.time);
+
+    // EOD 强平：不同日期 且 到了22:00 UTC
+    if (dt.getUTCHours() >= CFG.EOD_HOUR_UTC && dt.getUTCDate() !== entryDate) {
+      const pnl = sig.direction === 'BUY'
+        ? (c.close - sig.price) / sig.price
+        : (sig.price - c.close) / sig.price;
+      return pnl >= 0 ? 'WIN' : 'LOSS';
+    }
+
+    if (tp != null) {
+      if (sig.direction === 'BUY') {
+        if (c.low  <= sl) return 'LOSS';
+        if (c.high >= tp) return 'WIN';
+      } else {
+        if (c.high >= sl) return 'LOSS';
+        if (c.low  <= tp) return 'WIN';
+      }
+    }
+  }
+  return 'EOD';  // 未能在窗口内结算
+}
+
+/* ════════════════════════════════════════════════════════════
+   主回放逻辑
+   ════════════════════════════════════════════════════════════ */
+let resultJson = [];
+
+async function startBackfill() {
+  const days = parseInt(document.getElementById('days').value);
+  document.getElementById('output-area').style.display = 'none';
+  document.getElementById('log').textContent = '';
+  resultJson = [];
+
+  try {
+    const candles = await fetchAllCandles(days);
+    const WARMUP  = Math.max(CFG.RSI_PERIOD, CFG.EMA_LONG, CFG.BB_PERIOD, CFG.MFI_PERIOD)
+                  + CFG.VOL_PERIOD + 1;  // 71根
+
+    log(`开始回放（预热期 ${WARMUP} 根）...`);
+
+    let lastSigTs = { BUY: 0, SELL: 0 };
+    let sigCount  = 0;
+
+    for (let i = WARMUP; i < candles.length - 1; i++) {
+      const sig = generateSignalAt(candles, i);
+      if (!sig) continue;
+
+      const ts = candles[i].time;
+
+      // 去重：同方向30分钟内不入库
+      if (ts - lastSigTs[sig.direction] < CFG.DEDUP_MINUTES * 60 * 1000) continue;
+      lastSigTs[sig.direction] = ts;
+
+      const outcome = judgeOutcome(candles, i, sig);
+      const timeStr = new Date(ts).toLocaleString('zh-CN', {
+        month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'
+      });
+
+      sigCount++;
+      const icon = outcome === 'WIN' ? '✓' : outcome === 'LOSS' ? '✗' : '⏸';
+      const col  = outcome === 'WIN' ? '\x1b[32m' : outcome === 'LOSS' ? '\x1b[31m' : '';
+      log(`[${timeStr}] ${sig.direction} @$${sig.price.toFixed(0)} 分:${sig.score} → ${icon} ${outcome}`);
+
+      resultJson.push({
+        ts,
+        time:      timeStr,
+        direction: sig.direction,
+        strength:  sig.strength,
+        score:     sig.score,
+        price:     sig.price.toFixed(2),
+        stop:      sig.stop.toFixed(2),
+        bbTarget:  sig.bbTarget ? parseFloat(sig.bbTarget.toFixed(2)) : null,
+        rsi:       sig.rsi,
+        bbPct:     sig.bbPct,
+        emaTrend:  sig.emaTrend,
+        outcome,
+      });
+    }
+
+    const wins   = resultJson.filter(s => s.outcome === 'WIN').length;
+    const losses = resultJson.filter(s => s.outcome === 'LOSS').length;
+    const total  = wins + losses;
+    const wr     = total > 0 ? (wins / total * 100).toFixed(1) : '--';
+
+    log(`\n${'─'.repeat(50)}`);
+    log(`回放完成：共 ${sigCount} 笔信号`);
+    log(`已结算：${total} 笔  WIN ${wins}  LOSS ${losses}  胜率 ${wr}%`);
+    log(`EOD强平：${resultJson.filter(s=>s.outcome==='EOD').length} 笔（计入历史但不计胜率）`);
+
+    if (sigCount === 0) {
+      log(`\n⚠ 零信号——可能原因：Kraken API 被网络拦截，或回溯天数太短。`);
+      log(`  建议：用 VPN / 本地浏览器运行，或增加回溯天数。`);
+    } else {
+      document.getElementById('json-out').value = JSON.stringify(resultJson, null, 2);
+      document.getElementById('output-area').style.display = 'block';
+    }
+
+  } catch (e) {
+    log(`\n❌ 错误：${e.message}`);
+    log(`提示：Kraken API 在某些网络环境下不可访问，请在本地浏览器运行此文件。`);
+  }
+}
+
+function injectToStorage() {
+  if (!resultJson.length) { alert('没有数据可写入'); return; }
+  const existing = (() => {
+    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; }
+  })();
+  // 合并去重（按 ts 去重）
+  const merged = [...existing, ...resultJson]
+    .sort((a, b) => a.ts - b.ts)
+    .filter((v, i, arr) => i === 0 || arr[i-1].ts !== v.ts)
+    .slice(-50);  // 最多保留50条
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(merged));
+  alert(`✓ 已写入 localStorage：${merged.length} 条记录（含原有 ${existing.length} 条）`);
+}
+
+function copyJson() {
+  navigator.clipboard.writeText(document.getElementById('json-out').value)
+    .then(() => {
+      const tip = document.getElementById('copy-tip');
+      tip.style.display = 'inline';
+      setTimeout(() => { tip.style.display = 'none'; }, 2000);
+    });
+}
+
+function clearLog() {
+  document.getElementById('log').textContent = '';
+}
+
+function log(msg) {
+  const el = document.getElementById('log');
+  el.textContent += msg + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
