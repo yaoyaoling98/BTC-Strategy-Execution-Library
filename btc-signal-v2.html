@@ -262,6 +262,7 @@ header {
     white-space: nowrap;
 }
 .pill.active { border-color: var(--accent); color: var(--accent); background: rgba(41,98,255,.08); }
+.pill.high   { border-color: var(--green);  color: var(--green);  background: rgba(38,166,154,.08); }
 .pill.v-bonus { border-color: var(--green); color: var(--green); background: rgba(38,166,154,.08); }
 
 /* Vote total */
@@ -357,6 +358,36 @@ footer {
 .sf-sep { color: var(--border-default); }
 #sfWinRate { font-family: var(--font-mono); }
 #sfUpdate  { margin-left: auto; }
+
+/* ── Insight Card ──────────────────────────────────────────── */
+.insight-card {
+    margin: 0 16px 12px;
+    padding: 16px 20px;
+    background: #0d1117;
+    border-radius: var(--r);
+    line-height: 1.6;
+    min-height: 100px;
+}
+.ic-title {
+    font-size: 20px; font-weight: 700;
+    font-family: var(--font-ui);
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+.ic-title.ic-buy  { color: var(--green); }
+.ic-title.ic-sell { color: var(--red);   }
+.ic-row {
+    font-size: 15px;
+    color: var(--text-secondary);
+    font-family: var(--font-ui);
+    margin-top: 2px;
+}
+.ic-row em     { color: var(--text-primary); font-style: normal; }
+.ic-row.ic-warn { color: var(--yellow); }
+.ic-note {
+    font-size: 13px; color: var(--text-muted);
+    margin-top: 8px;
+}
 </style>
 </head>
 <body>
@@ -384,6 +415,9 @@ footer {
 
 <!-- ── News banner ─────────────────────────────────────────── -->
 <div id="newsBanner">⚠ NEWS MODE ON — ALL SIGNALS SUPPRESSED</div>
+
+<!-- ── Insight Card ────────────────────────────────────────── -->
+<div id="insightCard" class="insight-card"></div>
 
 <!-- ── 3-column layout ─────────────────────────────────────── -->
 <div class="layout">
@@ -913,12 +947,106 @@ function renderStatusFooter() {
     if (resolved.length >= 3) {
         const total = (wins / resolved.length * 100).toFixed(0);
         const r20   = recent.length >= 3
-            ? ' · L20: ' + (recentW / recent.length * 100).toFixed(0) + '%'
+            ? ' · 近20笔：' + (recentW / recent.length * 100).toFixed(0) + '%'
             : '';
-        wr.textContent = 'W/R: ' + total + '% (' + wins + '/' + resolved.length + ')' + r20 + ' · Open: ' + open;
+        wr.textContent = '胜率：' + total + '%（' + wins + '/' + resolved.length + '）' + r20 + ' · 持仓中：' + open + ' 笔';
     } else {
-        wr.textContent = 'W/R: — · Open: ' + open + ' · Need ≥3 resolved';
+        const need = Math.max(0, 3 - resolved.length);
+        wr.textContent = '胜率：暂无 · 持仓中：' + open + ' 笔 · 还差 ' + need + ' 笔信号才显示胜率';
     }
+}
+
+/* ================================================================
+   RENDER INSIGHT CARD
+   ================================================================ */
+function renderInsightCard(sig) {
+    const el = document.getElementById('insightCard');
+    if (!el) return;
+    const parts = [];
+
+    if (!sig || newsMode) {
+        parts.push('<div class="ic-title">📊 当前状态：观望中</div>');
+        parts.push('<div class="ic-row">➜ 等待行情数据加载…</div>');
+        el.innerHTML = parts.join('');
+        return;
+    }
+
+    const score       = sig.score;
+    const aboveThresh = score >= CONFIG.SIG_THRESHOLD;
+    const isBlocked   = !sig.risk.pass;
+    const isBuy       = sig.direction === 'BUY';
+    const vs          = sig.votes;
+    const fmtP        = v => '$' + Number(v).toLocaleString('en-US',
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    if (!aboveThresh || isBlocked) {
+        parts.push('<div class="ic-title">📊 当前状态：观望中</div>');
+
+        const gap    = Math.max(0, CONFIG.SIG_THRESHOLD - score);
+        const dirTxt = sig.direction === 'BUY' ? '买入' : sig.direction === 'SELL' ? '卖出' : '交易';
+        parts.push('<div class="ic-row">➜ 距离' + dirTxt + '信号还差 <em>' + gap
+            + ' 分</em>（当前 <em>' + score + '/100</em>，需 ≥' + CONFIG.SIG_THRESHOLD + '）</div>');
+
+        const bullNames = [], bearNames = [];
+        if (vs.rsi  > 0) bullNames.push('RSI');  else if (vs.rsi  < 0) bearNames.push('RSI');
+        if (vs.bb   > 0) bullNames.push('BB');   else if (vs.bb   < 0) bearNames.push('BB');
+        if (vs.vwap > 0) bullNames.push('VWAP'); else if (vs.vwap < 0) bearNames.push('VWAP');
+        if (vs.mfi  > 0) bullNames.push('MFI');  else if (vs.mfi  < 0) bearNames.push('MFI');
+
+        let voteTxt;
+        if (bullNames.length > bearNames.length) {
+            voteTxt = '4 个指标里 <em>' + bullNames.length + ' 个</em>倾向做多（'
+                + bullNames.join('、') + '），需要更多确认';
+        } else if (bearNames.length > bullNames.length) {
+            voteTxt = '4 个指标里 <em>' + bearNames.length + ' 个</em>倾向做空（'
+                + bearNames.join('、') + '），需要更多确认';
+        } else if (bullNames.length === 0) {
+            voteTxt = '4 个指标暂无明确方向，多空分歧';
+        } else {
+            voteTxt = '4 个指标多空分歧（各 <em>' + bullNames.length + ' 票</em>），继续观察';
+        }
+        parts.push('<div class="ic-row">➜ ' + voteTxt + '</div>');
+
+        if (isBlocked) {
+            parts.push('<div class="ic-row ic-warn">➜ ⚠️ 风控拦截：' + sig.risk.reason + '</div>');
+        } else {
+            parts.push('<div class="ic-row">➜ 没有可执行的交易，继续等待</div>');
+        }
+    } else {
+        const titleCls = isBuy ? 'ic-buy' : 'ic-sell';
+        const titleTxt = isBuy ? '🟢 买入信号触发！' : '🔴 卖出信号触发！';
+        parts.push('<div class="ic-title ' + titleCls + '">' + titleTxt + '</div>');
+
+        const entryP    = sig.raw.last;
+        const stopPrice = isBuy ? sig.stopLong : sig.stopShort;
+        const bbMid     = sig.raw.bb ? sig.raw.bb.middle : null;
+        const tpFb      = isBuy
+            ? (entryP * (1 + CONFIG.TAKE_PROFIT_PCT)).toFixed(2)
+            : (entryP * (1 - CONFIG.TAKE_PROFIT_PCT)).toFixed(2);
+        const tp        = bbMid ? fmtP(bbMid) : fmtP(tpFb);
+
+        parts.push('<div class="ic-row">➜ 进场价 <em>' + fmtP(entryP)
+            + '</em>　止损 <em>' + fmtP(stopPrice) + '</em>　目标价 <em>' + tp + '</em></div>');
+
+        const rrRatio = (CONFIG.TAKE_PROFIT_PCT / CONFIG.STOP_LOSS_PCT).toFixed(2);
+        parts.push('<div class="ic-row">➜ 盈亏比 1：<em>' + rrRatio
+            + '</em>　预期最大亏损 <em>' + (CONFIG.STOP_LOSS_PCT * 100).toFixed(1) + '%</em></div>');
+
+        const hist     = loadHistory();
+        const resolved = hist.filter(r => r.outcome === 'WIN' || r.outcome === 'LOSS');
+        const wins     = resolved.filter(r => r.outcome === 'WIN').length;
+        let wrTxt;
+        if (resolved.length >= 3) {
+            wrTxt = '历史相似信号胜率 <em>' + (wins / resolved.length * 100).toFixed(0)
+                + '%</em>（' + wins + ' 胜 ' + (resolved.length - wins) + ' 负）';
+        } else {
+            wrTxt = '历史样本不足，胜率统计暂无参考价值';
+        }
+        parts.push('<div class="ic-row">➜ ' + wrTxt + '</div>');
+        parts.push('<div class="ic-note">⚠️ 提示：这是机器信号，实盘前请人工确认</div>');
+    }
+
+    el.innerHTML = parts.join('');
 }
 
 /* ================================================================
@@ -938,9 +1066,18 @@ function renderIndicatorPanel(sig) {
     ];
     if (sig.scores.vBonus) pillDefs.push({ name: 'V-BTM', score: sig.scores.vBonus, bonus: true });
     pillsWrap.innerHTML = pillDefs.map(p => {
-        const cls = p.bonus ? 'pill v-bonus' : (p.score >= 10 ? 'pill active' : 'pill');
+        let cls, tip;
+        if (p.bonus) {
+            cls = 'pill v-bonus'; tip = 'V型底加分';
+        } else if (p.score >= 18) {
+            cls = 'pill high';   tip = '高分 (18-25)';
+        } else if (p.score >= 8) {
+            cls = 'pill active'; tip = '中等 (8-17)';
+        } else {
+            cls = 'pill';        tip = '低分 (0-7)';
+        }
         const lbl = p.bonus ? '+' + p.score : p.score + '/25';
-        return '<span class="' + cls + '">' + p.name + ' ' + lbl + '</span>';
+        return '<span class="' + cls + '" title="' + tip + '">' + p.name + ' ' + lbl + '</span>';
     }).join('');
 
     // ── Vote row ──────────────────────────────────────────────
@@ -1126,6 +1263,7 @@ async function runSignal() {
         updateOpenSignals(last);
         const sig = generateSignal(closes, candles, volumes);
         renderSignalCard(sig);
+        renderInsightCard(sig);
         renderIndicatorPanel(sig);
         logSignal(sig);
         renderHistory();
@@ -1155,6 +1293,7 @@ function startTimers() {
    ================================================================ */
 fetchTicker();
 runSignal();
+renderInsightCard(null);
 renderHistory();
 renderStatusFooter();
 startTimers();</script>
