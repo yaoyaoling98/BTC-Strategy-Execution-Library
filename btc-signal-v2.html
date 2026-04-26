@@ -76,6 +76,11 @@
     .strength-weak   { color: var(--muted); }
     .btn-clear { padding: 3px 10px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
     .btn-clear:hover { border-color: var(--red); color: var(--red); }
+
+    /* 评分药丸 — 来自 btc-monitor.html Plan A */
+    .score-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .score-pill  { font-size: 11px; padding: 2px 9px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); }
+    .score-pill.active { border-color: rgba(247,147,26,.4); color: var(--orange); }
   </style>
 </head>
 <body>
@@ -104,6 +109,7 @@
     <div class="card-title">信号结论</div>
     <div class="sig-direction" id="sig-dir">--</div>
     <div class="sig-meta" id="sig-meta"></div>
+    <div class="score-pills" id="score-pills" style="display:none"></div>
     <div class="entry-table" id="entry-table" style="display:none"></div>
   </div>
 
@@ -559,6 +565,20 @@ function renderSignalBox(sig) {
 
   box.style.display = 'block';
 
+  // ── 评分药丸（来自 btc-monitor.html Plan A）
+  const pp = document.getElementById('score-pills');
+  pp.style.display = 'flex';
+  const _pills = [
+    { label: `RSI ${sig.scores.rsi}/25`,   active: sig.scores.rsi  >= 10 },
+    { label: `BB ${sig.scores.bb}/25`,     active: sig.scores.bb   >= 10 },
+    { label: `VWAP ${sig.scores.vwap}/25`, active: sig.scores.vwap >= 10 },
+    { label: `MFI ${sig.scores.mfi}/25`,   active: sig.scores.mfi  >= 10 },
+  ];
+  if (sig.scores.vBonus) _pills.push({ label: `V底 +${sig.scores.vBonus}`, active: true });
+  pp.innerHTML = _pills.map(p =>
+    `<span class="score-pill${p.active ? ' active' : ''}">${p.label}</span>`
+  ).join('');
+
   const aboveThreshold = sig.score >= CONFIG.SIG_THRESHOLD;
   const blocked = !sig.risk.pass;
 
@@ -694,9 +714,9 @@ async function run() {
     log.innerHTML += `  ${'─'.repeat(40)}\n`;
     log.innerHTML += `  合计    ${' '.repeat(23)} <span class="num" style="font-size:14px">${sig.score}/100</span>  ${sig.strength}\n`;
 
-    // 投票结果
-    const voteTotal = sig.votes.rsi + sig.votes.bb + sig.votes.vwap;
-    log.innerHTML += `\n方向投票：RSI(${sig.votes.rsi>0?'+1':sig.votes.rsi<0?'-1':' 0'}) + BB(${sig.votes.bb>0?'+1':sig.votes.bb<0?'-1':' 0'}) + VWAP(${sig.votes.vwap>0?'+1':sig.votes.vwap<0?'-1':' 0'}) = ${voteTotal>0?'▲做多':voteTotal<0?'▼做空':'中立'}\n`;
+    // 投票结果（RSI + BB + VWAP + MFI 四票）
+    const voteTotal = sig.votes.rsi + sig.votes.bb + sig.votes.vwap + sig.votes.mfi;
+    log.innerHTML += `\n方向投票：RSI(${sig.votes.rsi>0?'+1':sig.votes.rsi<0?'-1':' 0'}) + BB(${sig.votes.bb>0?'+1':sig.votes.bb<0?'-1':' 0'}) + VWAP(${sig.votes.vwap>0?'+1':sig.votes.vwap<0?'-1':' 0'}) + MFI(${sig.votes.mfi>0?'+1':sig.votes.mfi<0?'-1':' 0'}) = ${voteTotal>0?'▲做多':voteTotal<0?'▼做空':'中立'}\n`;
 
     // 风控状态
     log.innerHTML += `\n风控检查：`;
@@ -714,22 +734,45 @@ async function run() {
   }
 }
 
-// ── 自动刷新（每30秒） ────────────────────────────────────────
-let countdown = 30;
-const cdEl = document.getElementById('countdown');
-
-function tickCountdown() {
-  countdown--;
-  cdEl.textContent = `下次刷新 ${countdown}s`;
-  if (countdown <= 0) {
-    countdown = 30;
-    run();
-  }
+// ── 5s Ticker：实时价格刷新（来源：btc-monitor.html）──────────
+async function fetchTicker() {
+  try {
+    const res  = await fetch(`${CONFIG.KRAKEN_REST}/Ticker?pair=${CONFIG.pair}`);
+    const json = await res.json();
+    if (json.error && json.error.length) return;
+    const t = json.result['XXBTZUSD'];
+    if (!t) return;
+    const price = parseFloat(t.c[0]);
+    const open  = parseFloat(t.o);
+    const pct   = (price - open) / open * 100;
+    document.getElementById('tb-price').textContent =
+      '$' + price.toLocaleString('en-US', { minimumFractionDigits: 2 });
+    const chgEl = document.getElementById('tb-change');
+    chgEl.textContent  = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+    chgEl.style.color      = '#fff';
+    chgEl.style.background = pct >= 0 ? '#26a69a' : '#ef5350';
+    // 用最新成交价扫描未结算持仓
+    updateOpenSignals(price);
+  } catch { /* 静默失败，不影响信号引擎 */ }
 }
 
-run();
-renderHistory(); // 页面加载时先渲染已有历史
-setInterval(tickCountdown, 1000);
+// ── 双速定时器：5s Ticker + 30s OHLC ─────────────────────────
+let ohlcCountdown   = 30;
+let tickerCountdown = 5;
+const cdEl = document.getElementById('countdown');
+
+function tick() {
+  ohlcCountdown--;
+  tickerCountdown--;
+  cdEl.textContent = `行情 ${tickerCountdown}s · 信号 ${ohlcCountdown}s`;
+  if (tickerCountdown <= 0) { tickerCountdown = 5;  fetchTicker(); }
+  if (ohlcCountdown   <= 0) { ohlcCountdown   = 30; run(); }
+}
+
+fetchTicker();          // 立即拉一次实时价
+run();                  // 立即拉一次 OHLC
+renderHistory();        // 渲染已有历史
+setInterval(tick, 1000);
 </script>
 </body>
 </html>
