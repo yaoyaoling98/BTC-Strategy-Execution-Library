@@ -407,14 +407,14 @@ footer {
         </span>
         <label class="news-toggle-wrap" title="消息面模式">
             <input type="checkbox" id="newsToggle" onchange="onNewsToggle()">
-            <span id="newsLabel">NEWS OFF</span>
+            <span id="newsLabel">消息面关</span>
         </label>
-        <button class="hdr-btn" onclick="runSignal()">↻ REFRESH</button>
+        <button class="hdr-btn" onclick="runSignal()">↻ 刷新</button>
     </div>
 </header>
 
 <!-- ── News banner ─────────────────────────────────────────── -->
-<div id="newsBanner">⚠ NEWS MODE ON — ALL SIGNALS SUPPRESSED</div>
+<div id="newsBanner">⚠ 消息面模式已开启 — 所有信号已暂停</div>
 
 <!-- ── Insight Card ────────────────────────────────────────── -->
 <div id="insightCard" class="insight-card"></div>
@@ -424,20 +424,20 @@ footer {
 
     <!-- LEFT: Indicators ──────────────────────────────────── -->
     <aside class="panel col-indicators">
-        <div class="panel-header">Indicators</div>
+        <div class="panel-header">指标</div>
 
         <div class="ind-section">
-            <div class="ind-section-label">Score</div>
+            <div class="ind-section-label">评分</div>
             <div class="pills-wrap" id="scorePills"></div>
         </div>
 
         <div class="ind-section">
-            <div class="ind-section-label">Vote</div>
+            <div class="ind-section-label">方向投票</div>
             <div class="vote-row" id="voteRow"></div>
         </div>
 
         <div class="ind-section">
-            <button class="expand-btn" id="expandBtn" onclick="toggleDetail()">▸ Detail</button>
+            <button class="expand-btn" id="expandBtn" onclick="toggleDetail()">▸ 详情</button>
         </div>
 
         <div class="ind-section" id="indicatorDetail" style="display:none">
@@ -447,9 +447,9 @@ footer {
 
     <!-- CENTER: Signal ─────────────────────────────────────── -->
     <section class="panel col-signal">
-        <div class="panel-header">Signal</div>
+        <div class="panel-header">信号</div>
         <div class="sig-body">
-            <div id="sigStatus">WAITING</div>
+            <div id="sigStatus">观望中</div>
             <div id="sigSub" class="sig-sub"></div>
             <div id="scoreBarWrap" class="score-bar-wrap">
                 <div class="score-bar-fill" id="scoreBarFill" style="width:0%"></div>
@@ -460,15 +460,15 @@ footer {
         </div>
         <div class="stats-row">
             <div class="stat-item">
-                <div class="stat-label">24H High</div>
+                <div class="stat-label">最高</div>
                 <div class="stat-val up" id="high24">--</div>
             </div>
             <div class="stat-item">
-                <div class="stat-label">24H Low</div>
+                <div class="stat-label">最低</div>
                 <div class="stat-val dn" id="low24">--</div>
             </div>
             <div class="stat-item">
-                <div class="stat-label">Volume</div>
+                <div class="stat-label">成交量</div>
                 <div class="stat-val" id="vol24">--</div>
             </div>
             <div class="stat-item">
@@ -481,17 +481,17 @@ footer {
     <!-- RIGHT: History ─────────────────────────────────────── -->
     <aside class="panel col-history">
         <div class="panel-header">
-            History
-            <button class="btn-clear" onclick="clearHistory()">Clear</button>
+            历史信号
+            <button class="btn-clear" onclick="clearHistory()">清空</button>
         </div>
         <div class="hist-row hist-hdr">
             <span></span>
-            <span>Dir</span>
-            <span>Score</span>
-            <span>Price</span>
-            <span style="text-align:right">Time</span>
+            <span>方向</span>
+            <span>评分</span>
+            <span>价格</span>
+            <span style="text-align:right">时间</span>
         </div>
-        <div id="histList"><div class="empty-hist">No signals yet</div></div>
+        <div id="histList"><div class="empty-hist">暂无信号记录</div></div>
     </aside>
 
 </div>
@@ -499,7 +499,7 @@ footer {
 <!-- ── Footer status bar ───────────────────────────────────── -->
 <footer>
     <span class="sf-dot" id="sfDot"></span>
-    <span id="sfConn">Connecting…</span>
+    <span id="sfConn">连接中…</span>
     <span class="sf-sep">|</span>
     <span id="sfWinRate">—</span>
     <span id="sfUpdate" style="margin-left:auto">—</span>
@@ -549,10 +549,10 @@ function fmtVol(v) {
 function relativeTime(ts) {
     const m = Math.floor((Date.now() - ts) / 60000);
     if (m < 1)  return 'just now';
-    if (m < 60) return m + 'm ago';
+    if (m < 60) return m + '分钟前';
     const h = Math.floor(m / 60);
-    if (h < 24) return h + 'h ago';
-    return Math.floor(h / 24) + 'd ago';
+    if (h < 24) return h + '小时前';
+    return Math.floor(h / 24) + '天前';
 }
 function flash(el) {
     if (!el) return;
@@ -567,7 +567,7 @@ function flash(el) {
 function onNewsToggle() {
     newsMode = document.getElementById('newsToggle').checked;
     const lbl = document.getElementById('newsLabel');
-    lbl.textContent = newsMode ? 'NEWS ON' : 'NEWS OFF';
+    lbl.textContent = newsMode ? '消息面开' : '消息面关';
     lbl.classList.toggle('active', newsMode);
     document.getElementById('newsBanner').style.display = newsMode ? 'block' : 'none';
     if (!newsMode) runSignal();
@@ -580,7 +580,7 @@ function onNewsToggle() {
 function toggleDetail() {
     detailOpen = !detailOpen;
     document.getElementById('indicatorDetail').style.display = detailOpen ? 'block' : 'none';
-    document.getElementById('expandBtn').textContent = (detailOpen ? '▾' : '▸') + ' Detail';
+    document.getElementById('expandBtn').textContent = (detailOpen ? '▾' : '▸') + ' 详情';
 }
 
 /* ================================================================
@@ -630,7 +630,7 @@ async function fetchTicker() {
         dot.className    = 'sf-dot ok';
         conn.textContent = 'Kraken · bid ' + bid.toFixed(0) + ' / ask ' + ask.toFixed(0);
         document.getElementById('sfUpdate').textContent =
-            'Updated ' + new Date().toLocaleTimeString('en-US', { hour12: false });
+            '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
 
     } catch (err) {
         dot.className    = 'sf-dot err';
@@ -804,8 +804,8 @@ function scoreMFI(mfi) {
 /* ── Risk manager  (Freqtrade EMA trend filter) ──────────── */
 function riskCheck(direction, ema20, ema50) {
     if (newsMode)                               return { pass: false, reason: 'News mode active' };
-    if (direction === 'BUY'  && ema20 < ema50)  return { pass: false, reason: 'EMA20 < EMA50 — bearish trend, long blocked' };
-    if (direction === 'SELL' && ema20 > ema50)  return { pass: false, reason: 'EMA20 > EMA50 — bullish trend, short blocked' };
+    if (direction === 'BUY'  && ema20 < ema50)  return { pass: false, reason: 'EMA20 < EMA50 — 空头趋势，禁止做多' };
+    if (direction === 'SELL' && ema20 > ema50)  return { pass: false, reason: 'EMA20 > EMA50 — 多头趋势，禁止做空' };
     return { pass: true, reason: 'OK' };
 }
 
@@ -841,7 +841,7 @@ function generateSignal(closes, candles, volumes) {
         ? { pass: false, reason: 'Vol spike >20× avg — manipulation filter' }
         : riskCheck(direction, ema20, ema50);
 
-    const strength  = totalScore >= 85 ? 'STRONG SIGNAL' : totalScore >= CONFIG.SIG_THRESHOLD ? 'SIGNAL' : 'BELOW THRESHOLD';
+    const strength  = totalScore >= 85 ? '强信号' : totalScore >= CONFIG.SIG_THRESHOLD ? '信号' : '未达阈值';
     const stopLong  = (last * (1 - CONFIG.STOP_LOSS_PCT)).toFixed(2);
     const stopShort = (last * (1 + CONFIG.STOP_LOSS_PCT)).toFixed(2);
 
@@ -914,7 +914,7 @@ function renderHistory() {
     const list    = document.getElementById('histList');
 
     if (!history.length) {
-        list.innerHTML = '<div class="empty-hist">No signals yet</div>';
+        list.innerHTML = '<div class="empty-hist">暂无信号记录</div>';
         return;
     }
 
@@ -924,7 +924,7 @@ function renderHistory() {
         const o    = h.outcome;
         const dotCls = o === 'WIN' ? 'win' : o === 'LOSS' ? 'loss' : 'open';
         const dirCls = h.direction === 'BUY' ? 'buy' : 'sell';
-        const dirTxt = h.direction === 'BUY' ? '▲ BUY' : '▼ SELL';
+        const dirTxt = h.direction === 'BUY' ? '▲ 做多' : '▼ 做空';
         return '<div class="hist-row">'
             + '<span class="h-dot ' + dotCls + '"></span>'
             + '<span class="h-dir ' + dirCls + '">' + dirTxt + '</span>'
@@ -1091,32 +1091,34 @@ function renderIndicatorPanel(sig) {
     ];
     const total = vs.rsi + vs.bb + vs.vwap + vs.mfi;
     const sumCls = total > 0 ? 'buy' : total < 0 ? 'sell' : 'neu';
-    const sumTxt = total > 0 ? '▲ BUY' : total < 0 ? '▼ SELL' : 'NEUTRAL';
-    voteRow.innerHTML = tags.map(t =>
-        '<span class="vote-tag">' + t.name + ' ' + (t.v > 0 ? '+1' : t.v < 0 ? '−1' : '0') + '</span>'
-    ).join('') + '<span class="vote-sum ' + sumCls + '">' + sumTxt + '</span>';
+    const sumTxt = total > 0 ? '▲ 做多' : total < 0 ? '▼ 做空' : '中性';
+    voteRow.innerHTML = tags.map(t => {
+        const vStr = t.v > 0 ? '+1' : t.v < 0 ? '−1' : '0';
+        const tip  = t.v > 0 ? '+1 = 看多该指标' : t.v < 0 ? '-1 = 看空该指标' : '0 = 中性';
+        return '<span class="vote-tag" title="' + tip + '">' + t.name + ' ' + vStr + '</span>';
+    }).join('') + '<span class="vote-sum ' + sumCls + '">' + sumTxt + '</span>';
 
     // ── Collapsible detail ────────────────────────────────────
     if (!detailOpen) return;
     const vwapDev = vwap ? ((last - vwap) / vwap * 100) : null;
     const rows = [
         { name: 'RSI(14)',  val: rsi ? rsi.toFixed(1) : '--',
-          sub: rsi < 30 ? 'OVERSOLD' : rsi > 70 ? 'OVERBOUGHT' : 'NEUTRAL',
+          sub: rsi < 30 ? '超卖' : rsi > 70 ? '超买' : '中性',
           vote: vs.rsi, bar: rsi / 100 },
         { name: 'BB%',      val: bb ? (bb.pct * 100).toFixed(1) + '%' : '--',
-          sub: bb && bb.pct < 0.2 ? 'NEAR LOW' : bb && bb.pct > 0.8 ? 'NEAR HIGH' : 'MID',
+          sub: bb && bb.pct < 0.2 ? '接近下轨' : bb && bb.pct > 0.8 ? '接近上轨' : '中间位置',
           vote: vs.bb, bar: bb ? bb.pct : 0.5 },
-        { name: 'VWAP dev', val: vwapDev != null ? (vwapDev > 0 ? '+' : '') + vwapDev.toFixed(2) + '%' : '--',
+        { name: 'VWAP偏差', val: vwapDev != null ? (vwapDev > 0 ? '+' : '') + vwapDev.toFixed(2) + '%' : '--',
           sub: vwap ? '$' + vwap.toFixed(0) : 'N/A',
           vote: vs.vwap, bar: vwapDev != null ? Math.min(1, Math.abs(vwapDev) / 3) : 0 },
         { name: 'MFI(14)',  val: mfi.toFixed(1),
-          sub: mfi < 30 ? 'OVERSOLD' : mfi > 70 ? 'OVERBOUGHT' : 'NEUTRAL',
+          sub: mfi < 30 ? '超卖' : mfi > 70 ? '超买' : '中性',
           vote: vs.mfi, bar: mfi / 100 },
-        { name: 'Vol ratio',val: volRatio.toFixed(2) + '×',
-          sub: volSpike ? 'SPIKE — BLOCKED' : volRatio >= 1.5 ? 'HIGH' : 'NORMAL',
+        { name: '成交量倍数',val: volRatio.toFixed(2) + '×',
+          sub: volSpike ? '异常成交量 — 已拦截' : volRatio >= 1.5 ? '偏高' : '正常',
           vote: 0, bar: Math.min(1, volRatio / 3) },
         { name: 'EMA 20/50',val: ema20.toFixed(0) + ' / ' + ema50.toFixed(0),
-          sub: ema20 > ema50 ? 'BULL' : 'BEAR',
+          sub: ema20 > ema50 ? '多头' : '空头',
           vote: 0, bar: null },
     ];
     const barColor = score => score >= 60 ? 'var(--green)' : score >= 30 ? 'var(--accent)' : 'var(--text-muted)';
@@ -1154,8 +1156,8 @@ function renderSignalCard(sig) {
     if (newsMode || !sig) {
         sigPanel.classList.add('sig-state-waiting');
         statusEl.className  = '';
-        statusEl.textContent = 'SUPPRESSED';
-        subEl.textContent    = newsMode ? 'NEWS MODE ACTIVE' : '';
+        statusEl.textContent = '已暂停';
+        subEl.textContent    = newsMode ? '消息面模式已开启' : '';
         barWrap.style.display = 'block';
         barFill.style.width   = '0%';
         legend.textContent    = '';
@@ -1175,8 +1177,8 @@ function renderSignalCard(sig) {
         // ── BLOCKED ─────────────────────────────────────────
         sigPanel.classList.add('sig-state-blocked');
         statusEl.className   = 'blocked';
-        statusEl.textContent = '⊘ BLOCKED';
-        subEl.textContent    = score + ' / 100 · ' + sig.direction;
+        statusEl.textContent = '⊘ 已拦截';
+        subEl.textContent    = score + ' / 100 · ' + (sig.direction === 'BUY' ? '做多' : sig.direction === 'SELL' ? '做空' : '中性');
         barWrap.style.display = 'block';
         legend.textContent    = sig.strength;
         blocked.style.display = 'block';
@@ -1191,11 +1193,11 @@ function renderSignalCard(sig) {
         // ── WAITING ──────────────────────────────────────────
         sigPanel.classList.add('sig-state-waiting');
         statusEl.className   = '';
-        statusEl.textContent = 'WAITING';
-        const tendTxt = sig.direction === 'NEUTRAL' ? 'NEUTRAL' : sig.direction + ' tendency';
+        statusEl.textContent = '观望中';
+        const tendTxt = sig.direction === 'NEUTRAL' ? '中性' : sig.direction === 'BUY' ? '做多倾向' : '做空倾向';
         subEl.textContent    = tendTxt;
         barWrap.style.display = 'block';
-        legend.textContent    = score + ' / 100 — need ≥' + CONFIG.SIG_THRESHOLD;
+        legend.textContent    = score + ' / 100 — 需达到' + CONFIG.SIG_THRESHOLD + '分';
         entryTbl.style.display = 'none';
         return;
     }
@@ -1204,7 +1206,7 @@ function renderSignalCard(sig) {
     const isBuy = sig.direction === 'BUY';
     sigPanel.classList.add(isBuy ? 'sig-state-buy' : 'sig-state-sell');
     statusEl.className   = isBuy ? 'buy' : 'sell';
-    statusEl.textContent = isBuy ? '▲ BUY' : '▼ SELL';
+    statusEl.textContent = isBuy ? '▲ 做多' : '▼ 做空';
     flash(statusEl);
     subEl.textContent    = sig.strength + ' · ' + score + ' / 100';
     barWrap.style.display = 'none';
@@ -1217,24 +1219,24 @@ function renderSignalCard(sig) {
         ? (entryP * (1 + CONFIG.TAKE_PROFIT_PCT)).toFixed(2)
         : (entryP * (1 - CONFIG.TAKE_PROFIT_PCT)).toFixed(2);
     const tpVal     = bbMid ? fmt(bbMid) : fmt(tpFb);
-    const tpSub     = bbMid ? ' <small style="color:var(--text-muted);font-weight:400">BB MID</small>' : '';
+    const tpSub     = bbMid ? ' <small style="color:var(--text-muted);font-weight:400">BB中轨</small>' : '';
     const rrRatio   = (CONFIG.TAKE_PROFIT_PCT / CONFIG.STOP_LOSS_PCT).toFixed(2);
 
     const hist     = loadHistory();
     const resolved = hist.filter(h => h.outcome === 'WIN' || h.outcome === 'LOSS');
     const wins     = resolved.filter(h => h.outcome === 'WIN').length;
     const wrVal    = resolved.length >= 3
-        ? (wins / resolved.length * 100).toFixed(0) + '% (' + wins + '/' + resolved.length + ')'
-        : resolved.length > 0 ? wins + '/' + resolved.length + ' (need more data)' : '—';
+        ? (wins / resolved.length * 100).toFixed(0) + '%（' + wins + '/' + resolved.length + '）'
+        : resolved.length > 0 ? wins + '/' + resolved.length + '（样本不足）' : '—';
 
     entryTbl.style.display = 'grid';
     entryTbl.innerHTML =
-        row('ENTRY',         fmt(entryP),                       '')
-      + row('TARGET',        tpVal + tpSub,                     'tp')
-      + row('STOP LOSS',     fmt(stopPrice) + ' &nbsp;−' + (CONFIG.STOP_LOSS_PCT * 100).toFixed(1) + '%', 'sl')
-      + row('R : R RATIO',   rrRatio + ' : 1',                  'rr')
-      + (sig.raw.vBottom ? rowFull('V-BOTTOM', '+10 pts bonus', 'tp') : '')
-      + rowFull('WIN RATE', wrVal, 'wr');
+        row('进场价',   fmt(entryP),                       '')
+      + row('目标价',   tpVal + tpSub,                     'tp')
+      + row('止损价',   fmt(stopPrice) + ' &nbsp;−' + (CONFIG.STOP_LOSS_PCT * 100).toFixed(1) + '%', 'sl')
+      + row('盈亏比',   rrRatio + ' : 1',                  'rr')
+      + (sig.raw.vBottom ? rowFull('V型底', '+10分加成', 'tp') : '')
+      + rowFull('历史胜率', wrVal, 'wr');
 
     function row(label, val, cls) {
         return '<div class="et-row">'
@@ -1269,7 +1271,7 @@ async function runSignal() {
         renderHistory();
         renderStatusFooter();
     } catch (err) {
-        document.getElementById('sfConn').textContent = 'OHLC error: ' + err.message;
+        document.getElementById('sfConn').textContent = '数据错误：' + err.message;
     }
 }
 
