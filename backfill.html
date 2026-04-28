@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>BTC信号历史回放 — localStorage冷启动工具</title>
+<title>BTC信号历史回放 — Binance冷启动工具</title>
 <style>
   body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:24px; max-width:900px; margin:0 auto; }
   h2   { color:#f7931a; margin-bottom:4px; }
@@ -26,7 +26,7 @@
 <body>
 
 <h2>📊 BTC信号历史回放 — 冷启动工具</h2>
-<p>从 Kraken 拉取历史K线，用当前策略逻辑回放信号，自动判定胜负，写入 localStorage</p>
+<p>从 Binance 拉取 BTCUSDT 历史K线，用当前策略逻辑回放信号，自动判定胜负，写入 localStorage</p>
 
 <div class="row">
   <label>回溯天数：</label>
@@ -69,47 +69,48 @@ const CFG = {
   DEDUP_MINUTES:  30,   // 同方向30分钟内不重复入库
 };
 const HISTORY_KEY = 'btc_signal_history';
-const KRAKEN_URL  = 'https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=15';
 
 /* ════════════════════════════════════════════════════════════
-   Kraken 数据拉取（分页，最多720根/次）
+   Binance 数据拉取（真实分页，每次最多1000根）
    ════════════════════════════════════════════════════════════ */
-async function fetchKrakenOHLC(sinceSec) {
-  const url = `${KRAKEN_URL}&since=${sinceSec}`;
-  const r = await fetch(url);
-  const d = await r.json();
-  if (d.error && d.error.length) throw new Error(d.error[0]);
-  const raw = d.result['XXBTZUSD'] || d.result['XBTUSD'];
-  // Kraken格式：[time, open, high, low, close, vwap, volume, count]
-  return raw.map(c => ({
-    time:   c[0] * 1000,
-    open:   parseFloat(c[1]),
-    high:   parseFloat(c[2]),
-    low:    parseFloat(c[3]),
-    close:  parseFloat(c[4]),
-    volume: parseFloat(c[6]),
-  }));
-}
-
 async function fetchAllCandles(days) {
-  const nowSec   = Math.floor(Date.now() / 1000);
-  const startSec = nowSec - days * 86400;
-  let   since    = startSec;
-  let   all      = [];
-  log(`正在拉取 Kraken 15m K线（过去 ${days} 天）...`);
-  while (true) {
-    const batch = await fetchKrakenOHLC(since);
-    if (!batch.length) break;
-    all = all.concat(batch);
+  const endTime   = Date.now();
+  const startTime = endTime - days * 86400 * 1000;
+  const LIMIT     = 1000;
+  const INTERVAL  = '15m';
+  let   all       = [];
+  let   curStart  = startTime;
+
+  log(`正在拉取 Binance 15m K线（过去 ${days} 天）...`);
+
+  while (curStart < endTime) {
+    const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${INTERVAL}&startTime=${curStart}&endTime=${endTime}&limit=${LIMIT}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('Binance API ' + resp.status);
+    const data = await resp.json();
+    if (!data.length) break;
+
+    const candles = data.map(c => ({
+      time:   c[0],
+      open:   parseFloat(c[1]),
+      high:   parseFloat(c[2]),
+      low:    parseFloat(c[3]),
+      close:  parseFloat(c[4]),
+      volume: parseFloat(c[5]),
+    }));
+
+    all = all.concat(candles);
     log(`  已获取 ${all.length} 根...`);
-    const lastTime = batch[batch.length - 1].time / 1000;
-    if (lastTime >= nowSec - 900 || batch.length < 700) break;
-    since = lastTime + 1;
-    await sleep(300);  // Kraken 限速保护
+
+    const lastTime = data[data.length - 1][0];
+    if (data.length < LIMIT) break;
+    curStart = lastTime + 1;
+    await sleep(200);  // 限速保护
   }
+
   // 去重排序
   const seen = new Set();
-  all = all.filter(c => { const k = c.time; return seen.has(k) ? false : seen.add(k); });
+  all = all.filter(c => seen.has(c.time) ? false : seen.add(c.time));
   all.sort((a, b) => a.time - b.time);
   log(`数据拉取完成，共 ${all.length} 根 K线\n`);
   return all;
@@ -376,8 +377,8 @@ async function startBackfill() {
     log(`EOD强平：${resultJson.filter(s=>s.outcome==='EOD').length} 笔（计入历史但不计胜率）`);
 
     if (sigCount === 0) {
-      log(`\n⚠ 零信号——可能原因：Kraken API 被网络拦截，或回溯天数太短。`);
-      log(`  建议：用 VPN / 本地浏览器运行，或增加回溯天数。`);
+      log(`\n⚠ 零信号——可能原因：Binance API 访问失败，或回溯天数太短。`);
+      log(`  建议：检查网络连接后重试，或增加回溯天数。`);
     } else {
       document.getElementById('json-out').value = JSON.stringify(resultJson, null, 2);
       document.getElementById('output-area').style.display = 'block';
@@ -385,7 +386,7 @@ async function startBackfill() {
 
   } catch (e) {
     log(`\n❌ 错误：${e.message}`);
-    log(`提示：Kraken API 在某些网络环境下不可访问，请在本地浏览器运行此文件。`);
+    log(`提示：Binance API 访问失败，请检查网络连接后重试。`);
   }
 }
 
