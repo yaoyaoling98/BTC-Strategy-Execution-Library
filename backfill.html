@@ -399,7 +399,7 @@ function injectToStorage() {
   const merged = [...existing, ...resultJson]
     .sort((a, b) => a.ts - b.ts)
     .filter((v, i, arr) => i === 0 || arr[i-1].ts !== v.ts)
-    .slice(-50);  // 最多保留50条
+    .slice(-200);  // 最多保留200条（与主面板一致）
   localStorage.setItem(HISTORY_KEY, JSON.stringify(merged));
   alert(`✓ 已写入 localStorage：${merged.length} 条记录（含原有 ${existing.length} 条）`);
 }
