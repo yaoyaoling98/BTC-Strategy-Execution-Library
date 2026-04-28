@@ -980,36 +980,39 @@ function renderInsightCard(sig) {
         { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     if (!aboveThresh || isBlocked) {
-        parts.push('<div class="ic-title">📊 当前状态：观望中</div>');
-
-        const gap    = Math.max(0, CONFIG.SIG_THRESHOLD - score);
-        const dirTxt = sig.direction === 'BUY' ? '买入' : sig.direction === 'SELL' ? '卖出' : '交易';
-        parts.push('<div class="ic-row">➜ 距离' + dirTxt + '信号还差 <em>' + gap
-            + ' 分</em>（当前 <em>' + score + '/100</em>，需 ≥' + CONFIG.SIG_THRESHOLD + '）</div>');
-
-        const bullNames = [], bearNames = [];
-        if (vs.rsi  > 0) bullNames.push('RSI');  else if (vs.rsi  < 0) bearNames.push('RSI');
-        if (vs.bb   > 0) bullNames.push('BB');   else if (vs.bb   < 0) bearNames.push('BB');
-        if (vs.vwap > 0) bullNames.push('VWAP'); else if (vs.vwap < 0) bearNames.push('VWAP');
-        if (vs.mfi  > 0) bullNames.push('MFI');  else if (vs.mfi  < 0) bearNames.push('MFI');
-
-        let voteTxt;
-        if (bullNames.length > bearNames.length) {
-            voteTxt = '4 个指标里 <em>' + bullNames.length + ' 个</em>倾向做多（'
-                + bullNames.join('、') + '），需要更多确认';
-        } else if (bearNames.length > bullNames.length) {
-            voteTxt = '4 个指标里 <em>' + bearNames.length + ' 个</em>倾向做空（'
-                + bearNames.join('、') + '），需要更多确认';
-        } else if (bullNames.length === 0) {
-            voteTxt = '4 个指标暂无明确方向，多空分歧';
-        } else {
-            voteTxt = '4 个指标多空分歧（各 <em>' + bullNames.length + ' 票</em>），继续观察';
-        }
-        parts.push('<div class="ic-row">➜ ' + voteTxt + '</div>');
-
-        if (isBlocked) {
+        if (isBlocked && aboveThresh) {
+            // 评分达标但被风控拦截
+            parts.push('<div class="ic-title">📊 当前状态：评分达标，已拦截</div>');
+            parts.push('<div class="ic-row">➜ 评分 <em>' + score + '/100</em> 已达到触发条件</div>');
             parts.push('<div class="ic-row ic-warn">➜ ⚠️ 风控拦截：' + sig.risk.reason + '</div>');
         } else {
+            // 评分未达标（无论是否拦截）
+            parts.push('<div class="ic-title">📊 当前状态：观望中</div>');
+
+            const gap    = Math.max(0, CONFIG.SIG_THRESHOLD - score);
+            const dirTxt = sig.direction === 'BUY' ? '买入' : sig.direction === 'SELL' ? '卖出' : '交易';
+            parts.push('<div class="ic-row">➜ 距离' + dirTxt + '信号还差 <em>' + gap
+                + ' 分</em>（当前 <em>' + score + '/100</em>，需 ≥' + CONFIG.SIG_THRESHOLD + '）</div>');
+
+            const bullNames = [], bearNames = [];
+            if (vs.rsi  > 0) bullNames.push('RSI');  else if (vs.rsi  < 0) bearNames.push('RSI');
+            if (vs.bb   > 0) bullNames.push('BB');   else if (vs.bb   < 0) bearNames.push('BB');
+            if (vs.vwap > 0) bullNames.push('VWAP'); else if (vs.vwap < 0) bearNames.push('VWAP');
+            if (vs.mfi  > 0) bullNames.push('MFI');  else if (vs.mfi  < 0) bearNames.push('MFI');
+
+            let voteTxt;
+            if (bullNames.length > bearNames.length) {
+                voteTxt = '4 个指标里 <em>' + bullNames.length + ' 个</em>倾向做多（'
+                    + bullNames.join('、') + '），需要更多确认';
+            } else if (bearNames.length > bullNames.length) {
+                voteTxt = '4 个指标里 <em>' + bearNames.length + ' 个</em>倾向做空（'
+                    + bearNames.join('、') + '），需要更多确认';
+            } else if (bullNames.length === 0) {
+                voteTxt = '4 个指标暂无明确方向，多空分歧';
+            } else {
+                voteTxt = '4 个指标多空分歧（各 <em>' + bullNames.length + ' 票</em>），继续观察';
+            }
+            parts.push('<div class="ic-row">➜ ' + voteTxt + '</div>');
             parts.push('<div class="ic-row">➜ 没有可执行的交易，继续等待</div>');
         }
     } else {
