@@ -71,46 +71,45 @@ const CFG = {
 const HISTORY_KEY = 'btc_signal_history';
 
 /* ════════════════════════════════════════════════════════════
-   OKX 数据拉取（after正序翻页，每次最多100根）
+   OKX 数据拉取（固定时间窗口切片，每次100根×15min）
    ════════════════════════════════════════════════════════════ */
 async function fetchAllCandles(days) {
   const endTime   = Date.now();
   const startTime = endTime - days * 86400 * 1000;
   const LIMIT     = 100;
+  const STEP      = LIMIT * 15 * 60 * 1000; // 100根 × 15分钟
   let   all       = [];
-  let   after     = startTime;
+  let   winStart  = startTime;
 
   log(`正在拉取 OKX 15m K线（过去 ${days} 天）...`);
 
-  while (after < endTime) {
-    const url = `https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT&bar=15m&limit=${LIMIT}&after=${after}`;
+  while (winStart < endTime) {
+    const winEnd = Math.min(winStart + STEP, endTime);
+    const url = `https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT&bar=15m&limit=${LIMIT}&after=${winStart}&before=${winEnd}`;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error('OKX API ' + resp.status);
     const json = await resp.json();
-    if (!json.data || !json.data.length) break;
 
-    const candles = json.data.map(c => ({
-      time:   parseInt(c[0]),
-      open:   parseFloat(c[1]),
-      high:   parseFloat(c[2]),
-      low:    parseFloat(c[3]),
-      close:  parseFloat(c[4]),
-      volume: parseFloat(c[5]),
-    }));
+    if (json.data && json.data.length) {
+      const candles = json.data.map(c => ({
+        time:   parseInt(c[0]),
+        open:   parseFloat(c[1]),
+        high:   parseFloat(c[2]),
+        low:    parseFloat(c[3]),
+        close:  parseFloat(c[4]),
+        volume: parseFloat(c[5]),
+      }));
+      all = all.concat(candles);
+      log(`  已获取 ${all.length} 根...`);
+    }
 
-    all = all.concat(candles);
-    log(`  已获取 ${all.length} 根...`);
-
-    const newest = Math.max(...candles.map(c => c.time));
-    if (candles.length < LIMIT) break;
-    after = newest + 1;
+    winStart = winEnd + 1;
     await sleep(300);
   }
 
   const seen = new Set();
   all = all.filter(c => seen.has(c.time) ? false : seen.add(c.time));
   all.sort((a, b) => a.time - b.time);
-  all = all.filter(c => c.time >= startTime && c.time <= endTime);
   log(`数据拉取完成，共 ${all.length} 根 K线\n`);
   return all;
 }
