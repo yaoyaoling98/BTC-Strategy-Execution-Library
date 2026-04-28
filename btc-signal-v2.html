@@ -534,6 +534,7 @@ let newsMode        = false;
 let tickerCountdown = TICKER_INTERVAL;
 let signalCountdown = SIGNAL_INTERVAL;
 let detailOpen      = false;
+let signalRunning   = false;
 
 /* ================================================================
    FORMATTERS
@@ -855,8 +856,14 @@ function generateSignal(closes, candles, volumes) {
 /* ================================================================
    HISTORY  (localStorage, max 50)
    ================================================================ */
-function loadHistory()     { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } }
-function saveHistory(list) { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(-50))); }
+function loadHistory() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+        const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+        return raw.filter(h => h.ts >= cutoff);
+    } catch { return []; }
+}
+function saveHistory(list) { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(-200))); }
 
 function logSignal(sig) {
     if (sig.score < CONFIG.SIG_THRESHOLD || !sig.risk.pass) return;
@@ -1262,11 +1269,12 @@ function renderSignalCard(sig) {
    MAIN SIGNAL RUN (every 30s)
    ================================================================ */
 async function runSignal() {
+    if (signalRunning) return;
+    signalRunning = true;
     try {
         const candles = await fetchOHLC(CONFIG.INTERVAL_15M);
         const closes  = candles.map(c => c.close);
         const volumes = candles.map(c => c.volume);
-        const last    = closes[closes.length - 1];
 
         updateOpenSignals(candles);
         const sig = generateSignal(closes, candles, volumes);
@@ -1278,6 +1286,8 @@ async function runSignal() {
         renderStatusFooter();
     } catch (err) {
         document.getElementById('sfConn').textContent = '数据错误：' + err.message;
+    } finally {
+        signalRunning = false;
     }
 }
 
