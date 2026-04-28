@@ -625,8 +625,6 @@ async function fetchTicker() {
         document.getElementById('vol24').textContent  = fmtVol(vol) + ' BTC';
         document.getElementById('vwap24').textContent = fmtUSD(vwap);
 
-        updateOpenSignals(price);
-
         dot.className    = 'sf-dot ok';
         conn.textContent = 'Kraken · bid ' + bid.toFixed(0) + ' / ask ' + ask.toFixed(0);
         document.getElementById('sfUpdate').textContent =
@@ -884,20 +882,25 @@ function logSignal(sig) {
     saveHistory(history);
 }
 
-function updateOpenSignals(currentPrice) {
+function updateOpenSignals(candles) {
     const history = loadHistory();
     let changed = false;
+    const intervalMs = CONFIG.INTERVAL_15M * 60 * 1000;
     for (const h of history) {
         if (h.outcome) continue;
         const sl = parseFloat(h.stop);
         const tp = h.bbTarget != null ? parseFloat(h.bbTarget) : null;
         if (tp == null) continue;
-        if (h.direction === 'BUY') {
-            if (currentPrice <= sl)      { h.outcome = 'LOSS'; changed = true; }
-            else if (currentPrice >= tp) { h.outcome = 'WIN';  changed = true; }
-        } else {
-            if (currentPrice >= sl)      { h.outcome = 'LOSS'; changed = true; }
-            else if (currentPrice <= tp) { h.outcome = 'WIN';  changed = true; }
+        // include the candle that was active when signal fired
+        for (const c of candles) {
+            if (c.time < h.ts - intervalMs) continue;
+            if (h.direction === 'BUY') {
+                if (c.low <= sl)       { h.outcome = 'LOSS'; changed = true; break; }
+                if (c.high >= tp)      { h.outcome = 'WIN';  changed = true; break; }
+            } else {
+                if (c.high >= sl)      { h.outcome = 'LOSS'; changed = true; break; }
+                if (c.low  <= tp)      { h.outcome = 'WIN';  changed = true; break; }
+            }
         }
     }
     if (changed) { saveHistory(history); renderHistory(); renderStatusFooter(); }
@@ -1265,7 +1268,7 @@ async function runSignal() {
         const volumes = candles.map(c => c.volume);
         const last    = closes[closes.length - 1];
 
-        updateOpenSignals(last);
+        updateOpenSignals(candles);
         const sig = generateSignal(closes, candles, volumes);
         renderSignalCard(sig);
         renderInsightCard(sig);
