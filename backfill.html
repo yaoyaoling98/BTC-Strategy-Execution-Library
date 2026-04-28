@@ -71,19 +71,19 @@ const CFG = {
 const HISTORY_KEY = 'btc_signal_history';
 
 /* ════════════════════════════════════════════════════════════
-   OKX 数据拉取（倒序分页，每次最多300根）
+   OKX 数据拉取（after正序翻页，每次最多100根）
    ════════════════════════════════════════════════════════════ */
 async function fetchAllCandles(days) {
   const endTime   = Date.now();
   const startTime = endTime - days * 86400 * 1000;
-  const LIMIT     = 300;
+  const LIMIT     = 100;
   let   all       = [];
-  let   before    = endTime;
+  let   after     = startTime;
 
   log(`正在拉取 OKX 15m K线（过去 ${days} 天）...`);
 
-  while (true) {
-    const url = `https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT&bar=15m&limit=${LIMIT}&before=${before}`;
+  while (after < endTime) {
+    const url = `https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT&bar=15m&limit=${LIMIT}&after=${after}`;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error('OKX API ' + resp.status);
     const json = await resp.json();
@@ -101,17 +101,16 @@ async function fetchAllCandles(days) {
     all = all.concat(candles);
     log(`  已获取 ${all.length} 根...`);
 
-    const oldest = parseInt(json.data[json.data.length - 1][0]);
-    if (oldest <= startTime || json.data.length < LIMIT) break;
-    before = oldest - 1;
-    await sleep(200);
+    const newest = Math.max(...candles.map(c => c.time));
+    if (candles.length < LIMIT) break;
+    after = newest + 1;
+    await sleep(300);
   }
 
   const seen = new Set();
   all = all.filter(c => seen.has(c.time) ? false : seen.add(c.time));
   all.sort((a, b) => a.time - b.time);
-  all = all.filter(c => c.time >= startTime);
-
+  all = all.filter(c => c.time >= startTime && c.time <= endTime);
   log(`数据拉取完成，共 ${all.length} 根 K线\n`);
   return all;
 }
