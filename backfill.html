@@ -65,8 +65,11 @@ const CFG = {
   SIG_THRESHOLD:   70,
   STOP_LOSS_PCT:  0.015,
   TAKE_PROFIT_PCT:0.020,
+  ATR_PERIOD:     14,
+  ATR_SL_MULT:    1.5,
+  ATR_TP_MULT:    2.25,
   EOD_HOUR_UTC:   22,
-  DEDUP_MINUTES:  30,   // 同方向30分钟内不重复入库
+  DEDUP_MINUTES:  30,
 };
 const HISTORY_KEY = 'btc_signal_history';
 
@@ -186,6 +189,19 @@ function calcVolRatio(volumes, period = CFG.VOL_PERIOD) {
   return avg > 0 ? volumes[volumes.length-1] / avg : 1;
 }
 
+function calcATR(candles, period) {
+  period = period || CFG.ATR_PERIOD;
+  if (candles.length < period + 1) return null;
+  const trs = [];
+  for (let i = 1; i < candles.length; i++) {
+    const h = candles[i].high, l = candles[i].low, pc = candles[i-1].close;
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < trs.length; i++) atr = (atr * (period - 1) + trs[i]) / period;
+  return atr;
+}
+
 function detectVBottom(candles) {
   if (candles.length < 6) return false;
   const avg = candles.slice(-6).map(c => (c.open+c.high+c.low+c.close)/4);
@@ -261,12 +277,25 @@ function generateSignalAt(candles, idx) {
   if (dir === 'BUY'  && ema20 < ema50) return null;
   if (dir === 'SELL' && ema20 > ema50) return null;
 
+  // ATR 动态止损（与主面板保持一致）
+  const atr = calcATR(slice);
+  let stop, bbTarget;
+  if (atr) {
+    const slDist = Math.min(Math.max(atr * CFG.ATR_SL_MULT, last * 0.008), last * 0.03);
+    const tpDist = slDist * (CFG.ATR_TP_MULT / CFG.ATR_SL_MULT);
+    stop     = dir === 'BUY' ? last - slDist : last + slDist;
+    bbTarget = dir === 'BUY' ? last + tpDist : last - tpDist;
+  } else {
+    stop     = dir === 'BUY' ? last*(1-CFG.STOP_LOSS_PCT) : last*(1+CFG.STOP_LOSS_PCT);
+    bbTarget = dir === 'BUY' ? last*(1+CFG.TAKE_PROFIT_PCT) : last*(1-CFG.TAKE_PROFIT_PCT);
+  }
+
   return {
     direction: dir,
     score:     total,
     price:     last,
-    stop:      dir === 'BUY' ? last*(1-CFG.STOP_LOSS_PCT) : last*(1+CFG.STOP_LOSS_PCT),
-    bbTarget:  bb ? bb.middle : null,   // 快照！
+    stop,
+    bbTarget,
     strength:  total >= 85 ? '强信号' : '弱信号',
     rsi:       rsi ? rsi.toFixed(1) : '--',
     bbPct:     bb  ? (bb.pct*100).toFixed(1)+'%' : '--',
