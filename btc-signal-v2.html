@@ -943,6 +943,135 @@ function loadHistory() {
 }
 function saveHistory(list) { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(-200))); }
 
+/* ================================================================
+   AUTO BACKFILL  — 首次打开冷启动 + 每次补缺历史数据
+   ================================================================ */
+async function autoBackfill() {
+    const OKX_BASE = 'https://www.okx.com/api/v5/market/candles';
+    const INST     = 'BTC-USDT';
+    const BAR      = '15m';
+    const LIMIT    = 100;
+    const STEP     = LIMIT * 15 * 60 * 1000;
+
+    const history  = loadHistory();
+    const now      = Date.now();
+    const COLD_DAYS = 90;
+    const GAP_MS    = 60 * 60 * 1000; // 1小时
+
+    let fetchStart, fetchEnd;
+    if (history.length < 10) {
+        // 冷启动：拉90天
+        fetchStart = now - COLD_DAYS * 24 * 3600 * 1000;
+        fetchEnd   = now;
+    } else {
+        const lastTs = Math.max(...history.map(h => h.ts));
+        if (now - lastTs < GAP_MS) return; // 数据新鲜，跳过
+        fetchStart = lastTs;
+        fetchEnd   = now;
+    }
+
+    const sb = document.getElementById('status-bar');
+    if (sb) sb.textContent = '正在补缺历史数据…';
+
+    // 分窗口拉取K线
+    const allCandles = [];
+    let winStart = fetchStart;
+    while (winStart < fetchEnd) {
+        const winEnd = Math.min(winStart + STEP, fetchEnd);
+        try {
+            const url = `${OKX_BASE}?instId=${INST}&bar=${BAR}&limit=${LIMIT}&after=${winEnd}&before=${winStart}`;
+            const res  = await fetch(url);
+            const json = await res.json();
+            if (json.code !== '0' || !json.data) { winStart = winEnd + 1; continue; }
+            for (const d of json.data) {
+                allCandles.push({
+                    time:   parseInt(d[0]),
+                    open:   parseFloat(d[1]),
+                    high:   parseFloat(d[2]),
+                    low:    parseFloat(d[3]),
+                    close:  parseFloat(d[4]),
+                    volume: parseFloat(d[5]),
+                });
+            }
+        } catch (_) { /* 静默失败 */ }
+        winStart = winEnd + 1;
+        await new Promise(r => setTimeout(r, 300));
+    }
+
+    if (allCandles.length < 50) {
+        if (sb) sb.textContent = '';
+        return;
+    }
+
+    // 去重 + 排序
+    const seen = new Set();
+    const uniq = allCandles.filter(c => { if (seen.has(c.time)) return false; seen.add(c.time); return true; });
+    uniq.sort((a, b) => a.time - b.time);
+
+    // 逐根K线跑信号
+    const MIN_LEN = Math.max(CONFIG.BB_PERIOD, CONFIG.RSI_PERIOD, CONFIG.EMA_LONG) + 10;
+    const existingTs = new Set(loadHistory().map(h => h.ts));
+    const newRecords  = [];
+    const DEDUP_MS    = 30 * 60 * 1000;
+
+    for (let i = MIN_LEN; i < uniq.length; i++) {
+        const slice   = uniq.slice(0, i + 1);
+        const closes  = slice.map(c => c.close);
+        const volumes = slice.map(c => c.volume);
+        const sig     = generateSignal(closes, slice, volumes);
+        if (!sig || sig.score < CONFIG.SIG_THRESHOLD || !sig.risk.pass) continue;
+
+        const ts = uniq[i].time;
+        if (existingTs.has(ts)) continue;
+
+        // 去重：同方向30分钟内只保留第一条
+        const recent = newRecords.filter(r => r.direction === sig.direction && Math.abs(r.ts - ts) < DEDUP_MS);
+        if (recent.length > 0) continue;
+
+        // 判断WIN/LOSS：扫描未来K线
+        let outcome = null;
+        const sl = parseFloat(sig.direction === 'BUY' ? sig.stopLong  : sig.stopShort);
+        const tp = parseFloat(sig.direction === 'BUY' ? sig.tpLong    : sig.tpShort);
+        for (let j = i + 1; j < uniq.length; j++) {
+            const fc = uniq[j];
+            if (sig.direction === 'BUY') {
+                if (fc.low  <= sl) { outcome = 'LOSS'; break; }
+                if (fc.high >= tp) { outcome = 'WIN';  break; }
+            } else {
+                if (fc.high >= sl) { outcome = 'LOSS'; break; }
+                if (fc.low  <= tp) { outcome = 'WIN';  break; }
+            }
+        }
+
+        const price = uniq[i].close;
+        newRecords.push({
+            ts,
+            time:      new Date(ts).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
+            direction: sig.direction,
+            strength:  sig.strength,
+            score:     sig.score,
+            price:     price.toFixed(2),
+            stop:      sig.direction === 'BUY' ? sig.stopLong : sig.stopShort,
+            bbTarget:  sig.direction === 'BUY' ? parseFloat(sig.tpLong) : parseFloat(sig.tpShort),
+            rsi:       sig.raw.rsi ? sig.raw.rsi.toFixed(1) : '--',
+            bbPct:     sig.raw.bb  ? (sig.raw.bb.pct * 100).toFixed(1) + '%' : '--',
+            emaTrend:  sig.raw.ema20 > sig.raw.ema50 ? 'bull' : 'bear',
+            outcome,
+        });
+        existingTs.add(ts);
+    }
+
+    if (newRecords.length > 0) {
+        const merged = [...loadHistory(), ...newRecords];
+        merged.sort((a, b) => a.ts - b.ts);
+        saveHistory(merged);
+        renderHistory();
+        renderStatusFooter();
+    }
+
+    if (sb) sb.textContent = '';
+}
+
 function logSignal(sig) {
     if (sig.score < CONFIG.SIG_THRESHOLD || !sig.risk.pass) return;
     const history = loadHistory();
@@ -1342,6 +1471,10 @@ function renderSignalCard(sig) {
    MAIN SIGNAL RUN (every 30s)
    ================================================================ */
 async function runSignal() {
+    if (typeof autoBackfill._ran === 'undefined') {
+        autoBackfill._ran = true;
+        autoBackfill(); // 后台静默运行，不 await
+    }
     if (signalRunning) return;
     signalRunning = true;
     try {
