@@ -857,16 +857,36 @@ function generateSignal(closes, candles, volumes) {
         ? { pass: false, reason: 'Vol spike >20× avg — manipulation filter' }
         : riskCheck(direction, ema20, ema50);
 
-    const strength  = totalScore >= 85 ? '强信号' : totalScore >= CONFIG.SIG_THRESHOLD ? '信号' : '未达阈值';
-    const stopLong  = (last * (1 - CONFIG.STOP_LOSS_PCT)).toFixed(2);
-    const stopShort = (last * (1 + CONFIG.STOP_LOSS_PCT)).toFixed(2);
+    const strength = totalScore >= 85 ? '强信号' : totalScore >= CONFIG.SIG_THRESHOLD ? '信号' : '未达阈值';
+
+    // ATR 动态止损（Freqtrade 社区标准，BTC 15m）
+    const atr = calcATR(candles);
+    let stopLong, stopShort, tpLong, tpShort, rrRatio;
+    if (atr) {
+        const slDist = Math.min(
+            Math.max(atr * CONFIG.ATR_SL_MULT, last * 0.008),
+            last * 0.03
+        );
+        const tpDist = slDist * (CONFIG.ATR_TP_MULT / CONFIG.ATR_SL_MULT);
+        stopLong  = (last - slDist).toFixed(2);
+        stopShort = (last + slDist).toFixed(2);
+        tpLong    = (last + tpDist).toFixed(2);
+        tpShort   = (last - tpDist).toFixed(2);
+        rrRatio   = (tpDist / slDist).toFixed(1);
+    } else {
+        stopLong  = (last * (1 - CONFIG.STOP_LOSS_PCT)).toFixed(2);
+        stopShort = (last * (1 + CONFIG.STOP_LOSS_PCT)).toFixed(2);
+        tpLong    = (last * (1 + CONFIG.TAKE_PROFIT_PCT)).toFixed(2);
+        tpShort   = (last * (1 - CONFIG.TAKE_PROFIT_PCT)).toFixed(2);
+        rrRatio   = (CONFIG.TAKE_PROFIT_PCT / CONFIG.STOP_LOSS_PCT).toFixed(1);
+    }
 
     return {
         score: totalScore, direction, strength, risk,
         scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, mfi: mfiR.score, vBonus },
         votes:  { rsi: rsiR.vote,  bb: bbR.vote,  vwap: vwapR.vote,  mfi: mfiR.vote  },
         raw:    { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last },
-        stopLong, stopShort,
+        stopLong, stopShort, tpLong, tpShort, rrRatio,
     };
 }
 
@@ -897,7 +917,7 @@ function logSignal(sig) {
         score:     sig.score,
         price:     price.toFixed(2),
         stop:      sig.direction === 'BUY' ? sig.stopLong : sig.stopShort,
-        bbTarget:  bb ? parseFloat(bb.middle.toFixed(2)) : null,
+        bbTarget:  sig.direction === 'BUY' ? parseFloat(sig.tpLong) : parseFloat(sig.tpShort),
         rsi:       rsi ? rsi.toFixed(1) : '--',
         bbPct:     bb  ? (bb.pct * 100).toFixed(1) + '%' : '--',
         emaTrend:  ema20 > ema50 ? 'bull' : 'bear',
