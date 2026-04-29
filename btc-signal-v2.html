@@ -976,26 +976,51 @@ async function autoBackfill() {
     // 分窗口拉取K线
     const allCandles = [];
     let winStart = fetchStart;
-    while (winStart < fetchEnd) {
-        const winEnd = Math.min(winStart + STEP, fetchEnd);
-        try {
-            const url = `${OKX_BASE}?instId=${INST}&bar=${BAR}&limit=${LIMIT}&after=${winEnd}&before=${winStart}`;
-            const res  = await fetch(url);
-            const json = await res.json();
-            if (json.code !== '0' || !json.data) { winStart = winEnd + 1; continue; }
-            for (const d of json.data) {
-                allCandles.push({
-                    time:   parseInt(d[0]),
-                    open:   parseFloat(d[1]),
-                    high:   parseFloat(d[2]),
-                    low:    parseFloat(d[3]),
-                    close:  parseFloat(d[4]),
-                    volume: parseFloat(d[5]),
-                });
+    let failCount = parseInt(localStorage.getItem('backfill_fail_count') || '0');
+
+    try {
+        while (winStart < fetchEnd) {
+            const winEnd = Math.min(winStart + STEP, fetchEnd);
+            let ok = false;
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    const url = `${OKX_BASE}?instId=${INST}&bar=${BAR}&limit=${LIMIT}&after=${winEnd}&before=${winStart}`;
+                    const res  = await fetch(url);
+                    const json = await res.json();
+                    if (json.code !== '0' || !json.data) break;
+                    for (const d of json.data) {
+                        allCandles.push({
+                            time:   parseInt(d[0]),
+                            open:   parseFloat(d[1]),
+                            high:   parseFloat(d[2]),
+                            low:    parseFloat(d[3]),
+                            close:  parseFloat(d[4]),
+                            volume: parseFloat(d[5]),
+                        });
+                    }
+                    ok = true;
+                    break;
+                } catch (e) {
+                    if (attempt === 1) {
+                        const msg = `autoBackfill 窗口失败 [${new Date(winStart).toISOString()}~${new Date(winEnd).toISOString()}]: ${e.message}`;
+                        console.error(msg);
+                        failCount++;
+                        localStorage.setItem('backfill_fail_count', failCount);
+                        if (sb) sb.textContent = `补缺失败(${failCount}次): ${e.message}`;
+                    }
+                    await new Promise(r => setTimeout(r, 500));
+                }
             }
-        } catch (_) { /* 静默失败 */ }
-        winStart = winEnd + 1;
-        await new Promise(r => setTimeout(r, 300));
+            if (!ok && allCandles.length === 0) break;
+            winStart = winEnd + 1;
+            await new Promise(r => setTimeout(r, 300));
+        }
+    } catch (err) {
+        failCount++;
+        localStorage.setItem('backfill_fail_count', failCount);
+        console.error('autoBackfill 致命错误:', err);
+        if (sb) sb.textContent = `补缺异常(${failCount}次): ${err.message}`;
+        return;
     }
 
     if (allCandles.length < 50) {
