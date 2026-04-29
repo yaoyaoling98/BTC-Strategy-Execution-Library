@@ -85,7 +85,7 @@ async function fetchAllCandles(days) {
 
   while (winStart < endTime) {
     const winEnd = Math.min(winStart + STEP, endTime);
-    const url = `https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT&bar=15m&limit=${LIMIT}&after=${winStart}&before=${winEnd}`;
+    const url = `https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT&bar=15m&limit=${LIMIT}&after=${winEnd}&before=${winStart}`;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error('OKX API ' + resp.status);
     const json = await resp.json();
