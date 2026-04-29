@@ -159,7 +159,7 @@ function calcEMA(closes, period) {
 function calcVWAP(candles) {
   const todayStart = (() => {
     const last = new Date(candles[candles.length-1].time);
-    return new Date(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate()).getTime();
+    return Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate());
   })();
   let cv = 0, cv2 = 0;
   for (const c of candles) {

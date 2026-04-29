@@ -708,7 +708,7 @@ function calcEMA(closes, period) {
 function calcVWAP(candles) {
     if (!candles || !candles.length) return null;
     const now   = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     let cumVP = 0, cumV = 0;
     for (const c of candles) {
         if (c.time < today) continue;
