@@ -1069,18 +1069,15 @@ function renderInsightCard(sig) {
 
         const entryP    = sig.raw.last;
         const stopPrice = isBuy ? sig.stopLong : sig.stopShort;
-        const bbMid     = sig.raw.bb ? sig.raw.bb.middle : null;
-        const tpFb      = isBuy
-            ? (entryP * (1 + CONFIG.TAKE_PROFIT_PCT)).toFixed(2)
-            : (entryP * (1 - CONFIG.TAKE_PROFIT_PCT)).toFixed(2);
-        const tp        = bbMid ? fmtP(bbMid) : fmtP(tpFb);
+        const tpPrice   = isBuy ? sig.tpLong   : sig.tpShort;
+        const slPct     = (Math.abs(entryP - parseFloat(stopPrice)) / entryP * 100).toFixed(1);
 
-        parts.push('<div class="ic-row">➜ 进场价 <em>' + fmtP(entryP)
-            + '</em>　止损 <em>' + fmtP(stopPrice) + '</em>　目标价 <em>' + tp + '</em></div>');
+        parts.push('<div class="ic-row">➜ 进场 <em>' + fmtP(entryP)
+            + '</em>　止损 <em>' + fmtP(stopPrice) + '</em>　目标 <em>' + fmtP(tpPrice)
+            + '</em>　盈亏比 <em>1:' + sig.rrRatio + '</em></div>');
 
-        const rrRatio = (CONFIG.TAKE_PROFIT_PCT / CONFIG.STOP_LOSS_PCT).toFixed(2);
-        parts.push('<div class="ic-row">➜ 盈亏比 1：<em>' + rrRatio
-            + '</em>　预期最大亏损 <em>' + (CONFIG.STOP_LOSS_PCT * 100).toFixed(1) + '%</em></div>');
+        parts.push('<div class="ic-row">➜ 盈亏比 1：<em>' + sig.rrRatio
+            + '</em>　预期最大亏损 <em>' + slPct + '%</em></div>');
 
         const hist     = loadHistory();
         const resolved = hist.filter(r => r.outcome === 'WIN' || r.outcome === 'LOSS');
@@ -1263,14 +1260,12 @@ function renderSignalCard(sig) {
     legend.textContent    = '';
 
     const entryP    = sig.raw.last;
-    const stopPrice = isBuy ? sig.stopLong : sig.stopShort;
-    const bbMid     = sig.raw.bb ? sig.raw.bb.middle : null;
-    const tpFb      = isBuy
-        ? (entryP * (1 + CONFIG.TAKE_PROFIT_PCT)).toFixed(2)
-        : (entryP * (1 - CONFIG.TAKE_PROFIT_PCT)).toFixed(2);
-    const tpVal     = bbMid ? fmt(bbMid) : fmt(tpFb);
-    const tpSub     = bbMid ? ' <small style="color:var(--text-muted);font-weight:400">BB中轨</small>' : '';
-    const rrRatio   = (CONFIG.TAKE_PROFIT_PCT / CONFIG.STOP_LOSS_PCT).toFixed(2);
+    const stopPrice = isBuy ? sig.stopLong  : sig.stopShort;
+    const tpPrice   = isBuy ? sig.tpLong    : sig.tpShort;
+    const tpVal     = fmt(tpPrice);
+    const tpSub     = '';
+    const rrRatio   = sig.rrRatio;
+    const slPct     = (Math.abs(entryP - parseFloat(stopPrice)) / entryP * 100).toFixed(1);
 
     const hist     = loadHistory();
     const resolved = hist.filter(h => h.outcome === 'WIN' || h.outcome === 'LOSS');
@@ -1283,8 +1278,8 @@ function renderSignalCard(sig) {
     entryTbl.innerHTML =
         row('进场价',   fmt(entryP),                       '')
       + row('目标价',   tpVal + tpSub,                     'tp')
-      + row('止损价',   fmt(stopPrice) + ' &nbsp;−' + (CONFIG.STOP_LOSS_PCT * 100).toFixed(1) + '%', 'sl')
-      + row('盈亏比',   rrRatio + ' : 1',                  'rr')
+      + row('止损价',   fmt(stopPrice) + ' &nbsp;−' + slPct + '%', 'sl')
+      + row('盈亏比',   '1 : ' + rrRatio,                  'rr')
       + (sig.raw.vBottom ? rowFull('V型底', '+10分加成', 'tp') : '')
       + rowFull('历史胜率', wrVal, 'wr');
 
