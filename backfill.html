@@ -189,6 +189,38 @@ function calcVolRatio(volumes, period = CFG.VOL_PERIOD) {
   return avg > 0 ? volumes[volumes.length-1] / avg : 1;
 }
 
+function calcADX(candles, period) {
+  period = period || 14;
+  if (candles.length < period * 2) return null;
+  const trs = [], plusDMs = [], minusDMs = [];
+  for (let i = 1; i < candles.length; i++) {
+    const h = candles[i].high, l = candles[i].low;
+    const ph = candles[i-1].high, pl = candles[i-1].low, pc = candles[i-1].close;
+    trs.push(Math.max(h-l, Math.abs(h-pc), Math.abs(l-pc)));
+    const upMove = h-ph, downMove = pl-l;
+    plusDMs.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDMs.push(downMove > upMove && downMove > 0 ? downMove : 0);
+  }
+  const smooth = arr => {
+    let s = arr.slice(0, period).reduce((a,b)=>a+b,0);
+    const r = [s];
+    for (let i = period; i < arr.length; i++) { s = s - s/period + arr[i]; r.push(s); }
+    return r;
+  };
+  const sTR = smooth(trs), sPDM = smooth(plusDMs), sMDM = smooth(minusDMs);
+  const DIs = sTR.map((tr,i) => ({
+    plus:  tr ? 100*sPDM[i]/tr : 0,
+    minus: tr ? 100*sMDM[i]/tr : 0,
+  }));
+  const DXs = DIs.map(d => {
+    const s = d.plus + d.minus;
+    return s ? 100*Math.abs(d.plus-d.minus)/s : 0;
+  });
+  let adx = DXs.slice(0, period).reduce((a,b)=>a+b,0)/period;
+  for (let i = period; i < DXs.length; i++) adx = (adx*(period-1)+DXs[i])/period;
+  return { adx, plusDI: DIs[DIs.length-1].plus, minusDI: DIs[DIs.length-1].minus };
+}
+
 function calcATR(candles, period) {
   period = period || CFG.ATR_PERIOD;
   if (candles.length < period + 1) return null;
@@ -276,6 +308,10 @@ function generateSignalAt(candles, idx) {
   // EMA风控
   if (dir === 'BUY'  && ema20 < ema50) return null;
   if (dir === 'SELL' && ema20 > ema50) return null;
+
+  // ADX 趋势强度过滤（与主面板一致）
+  const adxData = calcADX(slice);
+  if (adxData && adxData.adx < 20) return null;
 
   // ATR 动态止损（与主面板保持一致）
   const atr = calcATR(slice);
