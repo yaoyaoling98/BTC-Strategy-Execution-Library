@@ -1526,6 +1526,8 @@ async function runSignal() {
    DUAL TIMERS  5s ticker · 30s OHLC
    ================================================================ */
 function startTimers() {
+    if (window._timersStarted) return;
+    window._timersStarted = true;
     setInterval(() => {
         tickerCountdown--;
         document.getElementById('nextTicker').textContent = tickerCountdown + 's';
