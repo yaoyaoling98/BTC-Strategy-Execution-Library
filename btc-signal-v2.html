@@ -524,6 +524,9 @@ const CONFIG = {
     SIG_THRESHOLD:   70,
     STOP_LOSS_PCT:   0.015,
     TAKE_PROFIT_PCT: 0.020,
+    ATR_PERIOD:      14,
+    ATR_SL_MULT:     1.5,
+    ATR_TP_MULT:     2.25,
 };
 
 const TICKER_INTERVAL = 5;
@@ -740,6 +743,20 @@ function calcMFI(candles, period) {
 }
 
 /* ReinforcedQuickie: V-bottom — 5 declining bars then upturn */
+/* ATR — Wilder's smoothing（与 TradingView 一致）*/
+function calcATR(candles, period) {
+    period = period || CONFIG.ATR_PERIOD;
+    if (candles.length < period + 1) return null;
+    const trs = [];
+    for (let i = 1; i < candles.length; i++) {
+        const h = candles[i].high, l = candles[i].low, pc = candles[i - 1].close;
+        trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    }
+    let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < trs.length; i++) atr = (atr * (period - 1) + trs[i]) / period;
+    return atr;
+}
+
 function detectVBottom(candles) {
     if (candles.length < 6) return false;
     const avg = candles.slice(-6).map(c => (c.open + c.high + c.low + c.close) / 4);
