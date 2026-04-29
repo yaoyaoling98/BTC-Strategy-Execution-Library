@@ -345,14 +345,15 @@ function generateSignalAt(candles, idx) {
 function judgeOutcome(candles, entryIdx, sig) {
   const sl = sig.stop;
   const tp = sig.bbTarget;
-  const entryDate = new Date(candles[entryIdx].time).getUTCDate();
+  const toDateStr = d => `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+  const entryDate = toDateStr(new Date(candles[entryIdx].time));
 
   for (let i = entryIdx + 1; i < Math.min(entryIdx + 97, candles.length); i++) {
     const c  = candles[i];
     const dt = new Date(c.time);
 
     // EOD 强平：不同日期 且 到了22:00 UTC
-    if (dt.getUTCHours() >= CFG.EOD_HOUR_UTC && dt.getUTCDate() !== entryDate) {
+    if (dt.getUTCHours() >= CFG.EOD_HOUR_UTC && toDateStr(dt) !== entryDate) {
       const pnl = sig.direction === 'BUY'
         ? (c.close - sig.price) / sig.price
         : (sig.price - c.close) / sig.price;
