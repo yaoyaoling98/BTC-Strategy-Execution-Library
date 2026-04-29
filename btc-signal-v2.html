@@ -744,6 +744,39 @@ function calcMFI(candles, period) {
 
 /* ReinforcedQuickie: V-bottom — 5 declining bars then upturn */
 /* ATR — Wilder's smoothing（与 TradingView 一致）*/
+/* ADX — Wilder 平滑（趋势强度过滤）*/
+function calcADX(candles, period) {
+    period = period || 14;
+    if (candles.length < period * 2) return null;
+    const trs = [], plusDMs = [], minusDMs = [];
+    for (let i = 1; i < candles.length; i++) {
+        const h = candles[i].high, l = candles[i].low;
+        const ph = candles[i-1].high, pl = candles[i-1].low, pc = candles[i-1].close;
+        trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+        const upMove = h - ph, downMove = pl - l;
+        plusDMs.push(upMove > downMove && upMove > 0 ? upMove : 0);
+        minusDMs.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    }
+    const smooth = arr => {
+        let s = arr.slice(0, period).reduce((a, b) => a + b, 0);
+        const r = [s];
+        for (let i = period; i < arr.length; i++) { s = s - s / period + arr[i]; r.push(s); }
+        return r;
+    };
+    const sTR = smooth(trs), sPDM = smooth(plusDMs), sMDM = smooth(minusDMs);
+    const DIs = sTR.map((tr, i) => ({
+        plus:  tr ? 100 * sPDM[i] / tr : 0,
+        minus: tr ? 100 * sMDM[i] / tr : 0,
+    }));
+    const DXs = DIs.map(d => {
+        const s = d.plus + d.minus;
+        return s ? 100 * Math.abs(d.plus - d.minus) / s : 0;
+    });
+    let adx = DXs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < DXs.length; i++) adx = (adx * (period - 1) + DXs[i]) / period;
+    return { adx, plusDI: DIs[DIs.length - 1].plus, minusDI: DIs[DIs.length - 1].minus };
+}
+
 function calcATR(candles, period) {
     period = period || CONFIG.ATR_PERIOD;
     if (candles.length < period + 1) return null;
@@ -859,6 +892,10 @@ function generateSignal(closes, candles, volumes) {
 
     const strength = totalScore >= 85 ? '强信号' : totalScore >= CONFIG.SIG_THRESHOLD ? '信号' : '未达阈值';
 
+    // ADX 趋势强度过滤（ADX<20 = 震荡市，暂停信号）
+    const adxData = calcADX(candles);
+    const adx = adxData ? adxData.adx : 25;
+
     // ATR 动态止损（Freqtrade 社区标准，BTC 15m）
     const atr = calcATR(candles);
     let stopLong, stopShort, tpLong, tpShort, rrRatio;
@@ -881,8 +918,12 @@ function generateSignal(closes, candles, volumes) {
         rrRatio   = (CONFIG.TAKE_PROFIT_PCT / CONFIG.STOP_LOSS_PCT).toFixed(1);
     }
 
+    const finalRisk = (adx < 20 && risk.pass)
+        ? { pass: false, reason: `ADX ${adx.toFixed(0)} < 20，震荡市，信号暂停` }
+        : risk;
+
     return {
-        score: totalScore, direction, strength, risk,
+        score: totalScore, direction, strength, risk: finalRisk,
         scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, mfi: mfiR.score, vBonus },
         votes:  { rsi: rsiR.vote,  bb: bbR.vote,  vwap: vwapR.vote,  mfi: mfiR.vote  },
         raw:    { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last },
