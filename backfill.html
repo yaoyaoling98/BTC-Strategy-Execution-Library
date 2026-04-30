@@ -386,16 +386,28 @@ function generateSignalAt(candles, idx, cfg) {
    返回 { status: 'WIN'|'LOSS'|'DRAW', pnlR, closePrice, closeTs }
    ════════════════════════════════════════════════════════════ */
 function judgeOutcome(entryTs, direction, entry, sl, tp, candles, cfg) {
-  const isBuy  = direction === 'BUY';
-  const R      = Math.abs(entry - sl);
+  const isBuy = direction === 'BUY';
+
+  // 成本调整后的入场价
   const effEntry = isBuy ? entry * (1 + COST) : entry * (1 - COST);
-  const effSL    = isBuy ? sl    * (1 - COST) : sl    * (1 + COST);
+
+  // 限制止损距离上限 1.2%（防止ATR过宽导致R虚大）
+  const maxSLDist = entry * 0.012;
+  const slDist    = Math.min(Math.abs(entry - sl), maxSLDist);
+  const adjSL     = isBuy ? entry - slDist : entry + slDist;
+
+  // 止损含成本（滑点会让你亏更多）
+  const effSLAdj  = isBuy ? adjSL * (1 - COST) : adjSL * (1 + COST);
+
+  // R 全程统一定义：effEntry 到 effSLAdj 的距离
+  const R = Math.abs(effEntry - effSLAdj);
+  if (R === 0) return { status: 'DRAW', pnlR: 0, closePrice: entry, closeTs: entryTs };
 
   const TRAIL_ACTIVATION = cfg.TRAIL_ACTIVATION || 1.0;
   const TRAIL_STEP       = cfg.TRAIL_STEP       || 0.5;
 
   let trailActive = false;
-  let trailStop   = effSL;
+  let trailStop   = effSLAdj;   // 初始止损用调整后的有效止损
   let highWater   = effEntry;
 
   const future = candles.filter(c => c.time > entryTs)
@@ -405,6 +417,7 @@ function judgeOutcome(entryTs, direction, entry, sl, tp, candles, cfg) {
     const hi = c.high, lo = c.low;
 
     if (isBuy) {
+      // 止损优先：同一根K线同时触新高和止损 → 保守记止损
       if (lo <= trailStop) {
         const pnlR = (trailStop - effEntry) / R;
         return { status: pnlR >= 0 ? 'WIN' : 'LOSS', pnlR, closePrice: trailStop, closeTs: c.time };
@@ -417,6 +430,7 @@ function judgeOutcome(entryTs, direction, entry, sl, tp, candles, cfg) {
         if (newStop > trailStop) trailStop = newStop;
       }
     } else {
+      // 做空止损优先
       if (hi >= trailStop) {
         const pnlR = (effEntry - trailStop) / R;
         return { status: pnlR >= 0 ? 'WIN' : 'LOSS', pnlR, closePrice: trailStop, closeTs: c.time };
