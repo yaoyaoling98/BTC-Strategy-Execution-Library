@@ -384,8 +384,15 @@ function generateSignalAt(candles, idx, cfg) {
 /* ════════════════════════════════════════════════════════════
    胜负判定：跟踪止损（移除固定TP，让利润奔跑）
    返回 { status: 'WIN'|'LOSS'|'DRAW', pnlR, closePrice, closeTs }
-   trailStop / highWater 全程使用市场价（直接与OHLC比较）
-   pnlR 在 exit 时对称地扣除成本
+
+   R 定义（双边成本完全统一）：
+     effEntry  = entry * (1±COST)          — 入场含成本
+     effInitSL = initSL * (1∓COST)         — 止损含出场成本
+     R         = |effEntry - effInitSL|    — 固定单位，全程不变
+
+   trailStop / highWater：市场价（直接与OHLC比较）
+   pnlR 计算：exit 时对称扣成本，不多不少
+   单调性约束：trailStop 做多只能上移，做空只能下移
    ════════════════════════════════════════════════════════════ */
 function judgeOutcome(entryTs, direction, entry, sl, tp, candles, cfg) {
   const isBuy = direction === 'BUY';
@@ -549,13 +556,15 @@ async function startBackfill() {
     const avgWinR  = winRList.length  > 0 ? winRList.reduce((a,b)=>a+b,0)  / winRList.length  : 0;
     const avgLossR = lossRList.length > 0 ? lossRList.reduce((a,b)=>a+b,0) / lossRList.length : 1;
     const maxWinR  = winRList.length  > 0 ? Math.max(...winRList) : 0;
+    const maxLossR = lossRList.length > 0 ? Math.max(...lossRList) : 0;
     const ev       = total > 0 ? wr * avgWinR - (1 - wr) * avgLossR : null;
     const evSign   = ev != null ? (ev > 0 ? '✅ 正期望' : '❌ 负期望') : '';
 
     log(`\n${'─'.repeat(50)}`);
     log(`回放完成 [${cfg.name}]：共 ${sigCount} 笔信号`);
     log(`已结算：WIN ${wins}  LOSS ${losses}  DRAW ${draws}  胜率 ${wrPct}%`);
-    log(`平均盈利R：+${avgWinR.toFixed(2)}  平均亏损R：-${avgLossR.toFixed(2)}  最大单笔盈利R：+${maxWinR.toFixed(2)}`);
+    log(`平均盈利R：+${avgWinR.toFixed(2)}  平均亏损R：-${avgLossR.toFixed(2)}`);
+    log(`最大单笔盈利R：+${maxWinR.toFixed(2)}  最大单笔亏损R：-${maxLossR.toFixed(2)}${maxLossR > 1.1 ? '  ⚠️ 超过1.1R，检查SL宽度' : ''}`);
     log(`期望值：${ev != null ? (ev >= 0 ? '+' : '') + ev.toFixed(3) : '--'} R  ${evSign}`);
     log(`单边成本：滑点${(SLIPPAGE*100).toFixed(2)}% + 手续费${(FEE*100).toFixed(2)}% = ${(COST*100).toFixed(2)}%（含止损）`);
     log(`跟踪参数：激活=${cfg.TRAIL_ACTIVATION}R  步长=${cfg.TRAIL_STEP}R  超时=${cfg.MAX_HOLD_HOURS}h`);
