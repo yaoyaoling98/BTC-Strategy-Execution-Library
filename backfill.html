@@ -97,7 +97,10 @@ const PRESETS = {
   },
 };
 // backfill-specific constants
-const CFG = { EOD_HOUR_UTC: 22, DEDUP_MINUTES: 30 };
+const CFG      = { EOD_HOUR_UTC: 22, DEDUP_MINUTES: 30 };
+const SLIPPAGE = 0.0010; // 0.10% BTC大单保守滑点
+const FEE      = 0.0026; // 0.26% Kraken taker 真实费率
+const COST     = SLIPPAGE + FEE; // 单边总成本 0.36%
 const HISTORY_KEY = 'btc_signal_history';
 
 /* ════════════════════════════════════════════════════════════
@@ -371,8 +374,16 @@ function generateSignalAt(candles, idx, cfg) {
    胜负判定：扫描未来最多96根K线（1天）
    ════════════════════════════════════════════════════════════ */
 function judgeOutcome(candles, entryIdx, sig) {
-  const sl = sig.stop;
-  const tp = sig.bbTarget;
+  const isBuy   = sig.direction === 'BUY';
+  // 实际入场价（含进场成本）
+  const effEntry = isBuy ? sig.price * (1 + COST) : sig.price * (1 - COST);
+  // 实际止损价（含滑点+手续费，亏损更多）
+  const effSL    = isBuy ? sig.stop * (1 - COST) : sig.stop * (1 + COST);
+  // 实际目标价（含出场成本）
+  const effTP    = sig.bbTarget != null
+    ? (isBuy ? sig.bbTarget * (1 - COST) : sig.bbTarget * (1 + COST))
+    : null;
+
   const toDateStr = d => `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
   const entryDate = toDateStr(new Date(candles[entryIdx].time));
 
@@ -380,21 +391,22 @@ function judgeOutcome(candles, entryIdx, sig) {
     const c  = candles[i];
     const dt = new Date(c.time);
 
-    // EOD 强平：不同日期 且 到了22:00 UTC
+    // EOD 强平：不同日期 且 到了22:00 UTC（用成本调整后的入场价计算盈亏）
     if (dt.getUTCHours() >= CFG.EOD_HOUR_UTC && toDateStr(dt) !== entryDate) {
-      const pnl = sig.direction === 'BUY'
-        ? (c.close - sig.price) / sig.price
-        : (sig.price - c.close) / sig.price;
+      const exitPrice = isBuy ? c.close * (1 - COST) : c.close * (1 + COST);
+      const pnl = isBuy
+        ? (exitPrice - effEntry) / effEntry
+        : (effEntry - exitPrice) / effEntry;
       return pnl >= 0 ? 'WIN' : 'LOSS';
     }
 
-    if (tp != null) {
-      if (sig.direction === 'BUY') {
-        if (c.low  <= sl) return 'LOSS';
-        if (c.high >= tp) return 'WIN';
+    if (effTP != null) {
+      if (isBuy) {
+        if (c.low  <= sig.stop)     return 'LOSS'; // 市场触及止损价
+        if (c.high >= sig.bbTarget) return 'WIN';  // 市场触及目标价
       } else {
-        if (c.high >= sl) return 'LOSS';
-        if (c.low  <= tp) return 'WIN';
+        if (c.high >= sig.stop)     return 'LOSS';
+        if (c.low  <= sig.bbTarget) return 'WIN';
       }
     }
   }
@@ -441,15 +453,22 @@ async function startBackfill() {
       const col  = outcome === 'WIN' ? '\x1b[32m' : outcome === 'LOSS' ? '\x1b[31m' : '';
       log(`[${timeStr}] ${sig.direction} @$${sig.price.toFixed(0)} 分:${sig.score} → ${icon} ${outcome}`);
 
+      const isBuyDir = sig.direction === 'BUY';
+      const effEntry = isBuyDir ? sig.price * (1 + COST) : sig.price * (1 - COST);
+      const effStop  = isBuyDir ? sig.stop * (1 - COST)  : sig.stop * (1 + COST);
+      const effTP    = sig.bbTarget != null
+        ? (isBuyDir ? sig.bbTarget * (1 - COST) : sig.bbTarget * (1 + COST))
+        : null;
+
       resultJson.push({
         ts,
         time:      timeStr,
         direction: sig.direction,
         strength:  sig.strength,
         score:     sig.score,
-        price:     sig.price.toFixed(2),
-        stop:      sig.stop.toFixed(2),
-        bbTarget:  sig.bbTarget ? parseFloat(sig.bbTarget.toFixed(2)) : null,
+        price:     effEntry.toFixed(2),   // 含进场成本
+        stop:      effStop.toFixed(2),    // 含止损成本
+        bbTarget:  effTP != null ? parseFloat(effTP.toFixed(2)) : null, // 含出场成本
         rsi:       sig.rsi,
         bbPct:     sig.bbPct,
         emaTrend:  sig.emaTrend,
@@ -466,6 +485,7 @@ async function startBackfill() {
     log(`回放完成：共 ${sigCount} 笔信号`);
     log(`已结算：${total} 笔  WIN ${wins}  LOSS ${losses}  胜率 ${wr}%`);
     log(`EOD强平：${resultJson.filter(s=>s.outcome==='EOD').length} 笔（计入历史但不计胜率）`);
+    log(`单边成本：滑点${(SLIPPAGE*100).toFixed(2)}% + 手续费${(FEE*100).toFixed(2)}% = ${(COST*100).toFixed(2)}%（含止损）`);
 
     if (sigCount === 0) {
       log(`\n⚠ 零信号——可能原因：OKX API 访问失败，请检查网络连接，或回溯天数太短。`);
