@@ -35,6 +35,13 @@
     <option value="60">60天（≈5760根，预计6-15笔）</option>
     <option value="90" selected>90天（≈8640根，预计10-25笔，推荐）</option>
   </select>
+  <label style="margin-left:16px">参数组：</label>
+  <select id="preset-select">
+    <option value="base">基准版本</option>
+    <option value="A">A组：高胜率型</option>
+    <option value="B">B组：平衡型</option>
+    <option value="C">C组：保守型</option>
+  </select>
   <button class="primary" onclick="startBackfill()">▶ 开始回放</button>
   <button onclick="clearLog()">清空日志</button>
 </div>
@@ -418,28 +425,35 @@ function judgeOutcome(candles, entryIdx, sig) {
    ════════════════════════════════════════════════════════════ */
 let resultJson = [];
 
+// 基准回放结果（用于与其他参数组对比）
+let baseResultJson = null;
+
 async function startBackfill() {
-  const days = parseInt(document.getElementById('days').value);
+  const days       = parseInt(document.getElementById('days').value);
+  const presetKey  = document.getElementById('preset-select').value;
+  const cfg        = PRESETS[presetKey];
   document.getElementById('output-area').style.display = 'none';
   document.getElementById('log').textContent = '';
   resultJson = [];
 
   try {
     const candles = await fetchAllCandles(days);
-    const WARMUP  = Math.max(14, 50, 20, 14) + 20 + 1;  // RSI=14, EMA_LONG=50, BB=20, MFI=14, VOL=20 → 71根
+    const WARMUP  = Math.max(14, 50, 20, 14) + 20 + 1;
 
-    log(`开始回放（预热期 ${WARMUP} 根）...`);
+    log(`开始回放 [${cfg.name}]（预热期 ${WARMUP} 根）...`);
 
     let lastSigTs = { BUY: 0, SELL: 0 };
     let sigCount  = 0;
 
+    // 收集R倍数（用于期望值计算）
+    const winRList  = [];
+    const lossRList = [];
+
     for (let i = WARMUP; i < candles.length - 1; i++) {
-      const sig = generateSignalAt(candles, i);
+      const sig = generateSignalAt(candles, i, cfg);
       if (!sig) continue;
 
       const ts = candles[i].time;
-
-      // 去重：同方向30分钟内不入库
       if (ts - lastSigTs[sig.direction] < CFG.DEDUP_MINUTES * 60 * 1000) continue;
       lastSigTs[sig.direction] = ts;
 
@@ -450,7 +464,6 @@ async function startBackfill() {
 
       sigCount++;
       const icon = outcome === 'WIN' ? '✓' : outcome === 'LOSS' ? '✗' : '⏸';
-      const col  = outcome === 'WIN' ? '\x1b[32m' : outcome === 'LOSS' ? '\x1b[31m' : '';
       log(`[${timeStr}] ${sig.direction} @$${sig.price.toFixed(0)} 分:${sig.score} → ${icon} ${outcome}`);
 
       const isBuyDir = sig.direction === 'BUY';
@@ -460,15 +473,24 @@ async function startBackfill() {
         ? (isBuyDir ? sig.bbTarget * (1 - COST) : sig.bbTarget * (1 + COST))
         : null;
 
+      // 计算R倍数（基于有效价格）
+      if (effTP != null && outcome !== 'EOD') {
+        const slDist = Math.abs(effEntry - effStop);
+        const tpDist = Math.abs(effTP - effEntry);
+        const rUnit  = slDist > 0 ? tpDist / slDist : 1;
+        if (outcome === 'WIN')  winRList.push(rUnit);
+        if (outcome === 'LOSS') lossRList.push(1);
+      }
+
       resultJson.push({
         ts,
         time:      timeStr,
         direction: sig.direction,
         strength:  sig.strength,
         score:     sig.score,
-        price:     effEntry.toFixed(2),   // 含进场成本
-        stop:      effStop.toFixed(2),    // 含止损成本
-        bbTarget:  effTP != null ? parseFloat(effTP.toFixed(2)) : null, // 含出场成本
+        price:     effEntry.toFixed(2),
+        stop:      effStop.toFixed(2),
+        bbTarget:  effTP != null ? parseFloat(effTP.toFixed(2)) : null,
         rsi:       sig.rsi,
         bbPct:     sig.bbPct,
         emaTrend:  sig.emaTrend,
@@ -479,13 +501,36 @@ async function startBackfill() {
     const wins   = resultJson.filter(s => s.outcome === 'WIN').length;
     const losses = resultJson.filter(s => s.outcome === 'LOSS').length;
     const total  = wins + losses;
-    const wr     = total > 0 ? (wins / total * 100).toFixed(1) : '--';
+    const wr     = total > 0 ? wins / total : 0;
+    const wrPct  = total > 0 ? (wr * 100).toFixed(1) : '--';
+
+    // 期望值
+    const avgWinR  = winRList.length  > 0 ? winRList.reduce((a,b)=>a+b,0)  / winRList.length  : 0;
+    const avgLossR = lossRList.length > 0 ? lossRList.reduce((a,b)=>a+b,0) / lossRList.length : 1;
+    const ev       = total > 0 ? wr * avgWinR - (1 - wr) * avgLossR : null;
 
     log(`\n${'─'.repeat(50)}`);
-    log(`回放完成：共 ${sigCount} 笔信号`);
-    log(`已结算：${total} 笔  WIN ${wins}  LOSS ${losses}  胜率 ${wr}%`);
+    log(`回放完成 [${cfg.name}]：共 ${sigCount} 笔信号`);
+    log(`已结算：${total} 笔  WIN ${wins}  LOSS ${losses}  胜率 ${wrPct}%`);
+    log(`平均盈利R：${avgWinR.toFixed(2)}  平均亏损R：${avgLossR.toFixed(2)}`);
+    log(`期望值：${ev != null ? ev.toFixed(3) : '--'} R  ${ev != null && ev > 0 ? '✓ 正期望' : ev != null ? '✗ 负期望' : ''}`);
     log(`EOD强平：${resultJson.filter(s=>s.outcome==='EOD').length} 笔（计入历史但不计胜率）`);
     log(`单边成本：滑点${(SLIPPAGE*100).toFixed(2)}% + 手续费${(FEE*100).toFixed(2)}% = ${(COST*100).toFixed(2)}%（含止损）`);
+
+    // 与基准对比
+    if (presetKey === 'base') {
+      baseResultJson = { sigCount, total, wrPct, ev };
+    } else if (baseResultJson) {
+      const dSig = sigCount - baseResultJson.sigCount;
+      const dWR  = total > 0 && baseResultJson.total > 0
+        ? (parseFloat(wrPct) - parseFloat(baseResultJson.wrPct)).toFixed(1)
+        : '--';
+      const dEV  = ev != null && baseResultJson.ev != null
+        ? (ev - baseResultJson.ev).toFixed(3)
+        : '--';
+      log(`\n— 与基准对比 —`);
+      log(`信号数变化：${dSig >= 0 ? '+' : ''}${dSig}  胜率变化：${dWR >= 0 ? '+' : ''}${dWR}%  期望值变化：${dEV >= 0 ? '+' : ''}${dEV}R`);
+    }
 
     if (sigCount === 0) {
       log(`\n⚠ 零信号——可能原因：OKX API 访问失败，请检查网络连接，或回溯天数太短。`);
