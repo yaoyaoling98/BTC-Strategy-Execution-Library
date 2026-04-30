@@ -384,70 +384,76 @@ function generateSignalAt(candles, idx, cfg) {
 /* ════════════════════════════════════════════════════════════
    胜负判定：跟踪止损（移除固定TP，让利润奔跑）
    返回 { status: 'WIN'|'LOSS'|'DRAW', pnlR, closePrice, closeTs }
+   trailStop / highWater 全程使用市场价（直接与OHLC比较）
+   pnlR 在 exit 时对称地扣除成本
    ════════════════════════════════════════════════════════════ */
 function judgeOutcome(entryTs, direction, entry, sl, tp, candles, cfg) {
   const isBuy = direction === 'BUY';
-
-  // 成本调整后的入场价
-  const effEntry = isBuy ? entry * (1 + COST) : entry * (1 - COST);
-
-  // 限制止损距离上限 1.2%（防止ATR过宽导致R虚大）
-  const maxSLDist = entry * 0.012;
-  const slDist    = Math.min(Math.abs(entry - sl), maxSLDist);
-  const adjSL     = isBuy ? entry - slDist : entry + slDist;
-
-  // 止损含成本（滑点会让你亏更多）
-  const effSLAdj  = isBuy ? adjSL * (1 - COST) : adjSL * (1 + COST);
-
-  // R 全程统一定义：effEntry 到 effSLAdj 的距离
-  const R = Math.abs(effEntry - effSLAdj);
-  if (R === 0) return { status: 'DRAW', pnlR: 0, closePrice: entry, closeTs: entryTs };
-
   const TRAIL_ACTIVATION = cfg.TRAIL_ACTIVATION ?? 0.5;
   const TRAIL_STEP       = cfg.TRAIL_STEP       ?? 0.35;
 
-  let trailActive = false;
-  let trailStop   = effSLAdj;   // 初始止损用调整后的有效止损
-  let highWater   = effEntry;
+  // 入场含成本（对称成本第一端）
+  const effEntry = isBuy ? entry * (1 + COST) : entry * (1 - COST);
 
-  const future = candles.filter(c => c.time > entryTs)
-                         .slice(0, cfg.MAX_HOLD_HOURS * 4);
+  // 止损上限 1.2%，得到市场价止损位
+  const maxSLDist = entry * 0.012;
+  const slDist    = Math.min(Math.abs(entry - sl), maxSLDist);
+  const initSL    = isBuy ? entry - slDist : entry + slDist;  // 市场价
+
+  // R 基于有效价格（入场+出场两端成本均已计入）
+  const effInitSL = isBuy ? initSL * (1 - COST) : initSL * (1 + COST);
+  const R         = Math.abs(effEntry - effInitSL);
+  if (R === 0) return { status: 'DRAW', pnlR: 0, closePrice: entry, closeTs: entryTs };
+
+  // trailStop / highWater 均为市场价（用于OHLC比较）
+  let trailStop  = initSL;
+  let highWater  = entry;
+  let trailActive = false;
+
+  const future = candles.filter(c => c.time > entryTs).slice(0, cfg.MAX_HOLD_HOURS * 4);
 
   for (const c of future) {
-    const hi = c.high, lo = c.low;
-
     if (isBuy) {
-      // 止损优先：同一根K线同时触新高和止损 → 保守记止损
-      if (lo <= trailStop) {
-        const pnlR = (trailStop - effEntry) / R;
+      // Step A：止损优先，同一根K线SL和新高同触发 → 保守记止损
+      if (c.low <= trailStop) {
+        const exitEff = trailStop * (1 - COST);   // 出场含成本（对称第二端）
+        const pnlR    = (exitEff - effEntry) / R;
         return { status: pnlR >= 0 ? 'WIN' : 'LOSS', pnlR, closePrice: trailStop, closeTs: c.time };
       }
-      if (hi > highWater) highWater = hi;
-      const profit = (highWater - effEntry) / R;
-      if (profit >= TRAIL_ACTIVATION && !trailActive) {
+      // Step B：更新最高市场价
+      if (c.high > highWater) highWater = c.high;
+      // Step D：激活检测（用有效价计算盈利倍数）
+      const effHigh = highWater * (1 - COST);
+      const profit  = (effHigh - effEntry) / R;
+      if (!trailActive && profit >= TRAIL_ACTIVATION) {
         trailActive = true;
-        // 激活时先推到 entry - 0.2R（小幅保护，不直接推保本）
-        const initStop = effEntry - 0.2 * R;
-        if (initStop > trailStop) trailStop = initStop;
+        // 激活时推进到 entry - 0.2*R（市场价近似，仅单调上移）
+        const initPush = entry - 0.2 * R;
+        if (initPush > trailStop) trailStop = initPush;
       }
+      // Step C：跟踪上移（单调性：只能上移）
       if (trailActive) {
         const newStop = highWater - TRAIL_STEP * R;
         if (newStop > trailStop) trailStop = newStop;
       }
     } else {
-      // 做空止损优先
-      if (hi >= trailStop) {
-        const pnlR = (effEntry - trailStop) / R;
+      // Step A
+      if (c.high >= trailStop) {
+        const exitEff = trailStop * (1 + COST);
+        const pnlR    = (effEntry - exitEff) / R;
         return { status: pnlR >= 0 ? 'WIN' : 'LOSS', pnlR, closePrice: trailStop, closeTs: c.time };
       }
-      if (lo < highWater) highWater = lo;
-      const profit = (effEntry - highWater) / R;
-      if (profit >= TRAIL_ACTIVATION && !trailActive) {
+      // Step B
+      if (c.low < highWater) highWater = c.low;
+      // Step D
+      const effLow = highWater * (1 + COST);
+      const profit = (effEntry - effLow) / R;
+      if (!trailActive && profit >= TRAIL_ACTIVATION) {
         trailActive = true;
-        // 做空激活时先推到 entry + 0.2R
-        const initStop = effEntry + 0.2 * R;
-        if (initStop < trailStop) trailStop = initStop;
+        const initPush = entry + 0.2 * R;
+        if (initPush < trailStop) trailStop = initPush;
       }
+      // Step C（单调：只能下移）
       if (trailActive) {
         const newStop = highWater + TRAIL_STEP * R;
         if (newStop < trailStop) trailStop = newStop;
@@ -455,13 +461,11 @@ function judgeOutcome(entryTs, direction, entry, sl, tp, candles, cfg) {
     }
   }
 
-  // 超时：按最后收盘价结算
+  // 超时：出场也含成本
   const lastPrice = future.length > 0 ? future[future.length - 1].close : entry;
-  const exitPrice = isBuy ? lastPrice * (1 - COST) : lastPrice * (1 + COST);
-  const pnlR = isBuy
-    ? (exitPrice - effEntry) / R
-    : (effEntry - exitPrice) / R;
-  const status = pnlR >= cfg.TIMEOUT_R_RATIO ? 'WIN' : pnlR <= -cfg.TIMEOUT_R_RATIO ? 'LOSS' : 'DRAW';
+  const exitEff   = isBuy ? lastPrice * (1 - COST) : lastPrice * (1 + COST);
+  const pnlR      = isBuy ? (exitEff - effEntry) / R : (effEntry - exitEff) / R;
+  const status    = pnlR >= cfg.TIMEOUT_R_RATIO ? 'WIN' : pnlR <= -cfg.TIMEOUT_R_RATIO ? 'LOSS' : 'DRAW';
   return { status, pnlR, closePrice: lastPrice, closeTs: entryTs + cfg.MAX_HOLD_HOURS * 3600 * 1000 };
 }
 
