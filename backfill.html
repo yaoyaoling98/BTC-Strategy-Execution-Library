@@ -71,7 +71,7 @@ const PRESETS = {
     ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
     ENTRY_DISTANCE_PCT: 0,
     MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
-    TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
+    TRAIL_ACTIVATION: 0.5, TRAIL_STEP: 0.35,
   },
   A: {
     name: 'A组高胜率',
@@ -82,7 +82,7 @@ const PRESETS = {
     ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
     ENTRY_DISTANCE_PCT: 0.0015,
     MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
-    TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
+    TRAIL_ACTIVATION: 0.5, TRAIL_STEP: 0.35,
   },
   B: {
     name: 'B组平衡',
@@ -93,7 +93,7 @@ const PRESETS = {
     ADX_MIN: 18, ADX_MID: 25, ADX_MID_SCORE: 75,
     ENTRY_DISTANCE_PCT: 0.0015,
     MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
-    TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
+    TRAIL_ACTIVATION: 0.5, TRAIL_STEP: 0.35,
   },
   C: {
     name: 'C组保守',
@@ -104,7 +104,7 @@ const PRESETS = {
     ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
     ENTRY_DISTANCE_PCT: 0,
     MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
-    TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
+    TRAIL_ACTIVATION: 0.5, TRAIL_STEP: 0.35,
   },
 };
 // backfill-specific constants
@@ -403,8 +403,8 @@ function judgeOutcome(entryTs, direction, entry, sl, tp, candles, cfg) {
   const R = Math.abs(effEntry - effSLAdj);
   if (R === 0) return { status: 'DRAW', pnlR: 0, closePrice: entry, closeTs: entryTs };
 
-  const TRAIL_ACTIVATION = cfg.TRAIL_ACTIVATION || 1.0;
-  const TRAIL_STEP       = cfg.TRAIL_STEP       || 0.5;
+  const TRAIL_ACTIVATION = cfg.TRAIL_ACTIVATION ?? 0.5;
+  const TRAIL_STEP       = cfg.TRAIL_STEP       ?? 0.35;
 
   let trailActive = false;
   let trailStop   = effSLAdj;   // 初始止损用调整后的有效止损
@@ -424,7 +424,12 @@ function judgeOutcome(entryTs, direction, entry, sl, tp, candles, cfg) {
       }
       if (hi > highWater) highWater = hi;
       const profit = (highWater - effEntry) / R;
-      if (profit >= TRAIL_ACTIVATION && !trailActive) trailActive = true;
+      if (profit >= TRAIL_ACTIVATION && !trailActive) {
+        trailActive = true;
+        // 激活时先推到 entry - 0.2R（小幅保护，不直接推保本）
+        const initStop = effEntry - 0.2 * R;
+        if (initStop > trailStop) trailStop = initStop;
+      }
       if (trailActive) {
         const newStop = highWater - TRAIL_STEP * R;
         if (newStop > trailStop) trailStop = newStop;
@@ -437,7 +442,12 @@ function judgeOutcome(entryTs, direction, entry, sl, tp, candles, cfg) {
       }
       if (lo < highWater) highWater = lo;
       const profit = (effEntry - highWater) / R;
-      if (profit >= TRAIL_ACTIVATION && !trailActive) trailActive = true;
+      if (profit >= TRAIL_ACTIVATION && !trailActive) {
+        trailActive = true;
+        // 做空激活时先推到 entry + 0.2R
+        const initStop = effEntry + 0.2 * R;
+        if (initStop < trailStop) trailStop = initStop;
+      }
       if (trailActive) {
         const newStop = highWater + TRAIL_STEP * R;
         if (newStop < trailStop) trailStop = newStop;
