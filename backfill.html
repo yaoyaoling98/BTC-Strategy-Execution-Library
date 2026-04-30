@@ -71,6 +71,7 @@ const PRESETS = {
     ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
     ENTRY_DISTANCE_PCT: 0,
     MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
+    TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
   },
   A: {
     name: 'A组高胜率',
@@ -81,6 +82,7 @@ const PRESETS = {
     ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
     ENTRY_DISTANCE_PCT: 0.0015,
     MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
+    TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
   },
   B: {
     name: 'B组平衡',
@@ -91,6 +93,7 @@ const PRESETS = {
     ADX_MIN: 18, ADX_MID: 25, ADX_MID_SCORE: 75,
     ENTRY_DISTANCE_PCT: 0.0015,
     MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
+    TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
   },
   C: {
     name: 'C组保守',
@@ -101,6 +104,7 @@ const PRESETS = {
     ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
     ENTRY_DISTANCE_PCT: 0,
     MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
+    TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
   },
 };
 // backfill-specific constants
@@ -378,46 +382,63 @@ function generateSignalAt(candles, idx, cfg) {
 }
 
 /* ════════════════════════════════════════════════════════════
-   胜负判定：扫描未来最多96根K线（1天）
+   胜负判定：跟踪止损（移除固定TP，让利润奔跑）
+   返回 { status: 'WIN'|'LOSS'|'DRAW', pnlR, closePrice, closeTs }
    ════════════════════════════════════════════════════════════ */
-function judgeOutcome(candles, entryIdx, sig) {
-  const isBuy   = sig.direction === 'BUY';
-  // 实际入场价（含进场成本）
-  const effEntry = isBuy ? sig.price * (1 + COST) : sig.price * (1 - COST);
-  // 实际止损价（含滑点+手续费，亏损更多）
-  const effSL    = isBuy ? sig.stop * (1 - COST) : sig.stop * (1 + COST);
-  // 实际目标价（含出场成本）
-  const effTP    = sig.bbTarget != null
-    ? (isBuy ? sig.bbTarget * (1 - COST) : sig.bbTarget * (1 + COST))
-    : null;
+function judgeOutcome(entryTs, direction, entry, sl, tp, candles, cfg) {
+  const isBuy  = direction === 'BUY';
+  const R      = Math.abs(entry - sl);
+  const effEntry = isBuy ? entry * (1 + COST) : entry * (1 - COST);
+  const effSL    = isBuy ? sl    * (1 - COST) : sl    * (1 + COST);
 
-  const toDateStr = d => `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
-  const entryDate = toDateStr(new Date(candles[entryIdx].time));
+  const TRAIL_ACTIVATION = cfg.TRAIL_ACTIVATION || 1.0;
+  const TRAIL_STEP       = cfg.TRAIL_STEP       || 0.5;
 
-  for (let i = entryIdx + 1; i < Math.min(entryIdx + 97, candles.length); i++) {
-    const c  = candles[i];
-    const dt = new Date(c.time);
+  let trailActive = false;
+  let trailStop   = effSL;
+  let highWater   = effEntry;
 
-    // EOD 强平：不同日期 且 到了22:00 UTC（用成本调整后的入场价计算盈亏）
-    if (dt.getUTCHours() >= CFG.EOD_HOUR_UTC && toDateStr(dt) !== entryDate) {
-      const exitPrice = isBuy ? c.close * (1 - COST) : c.close * (1 + COST);
-      const pnl = isBuy
-        ? (exitPrice - effEntry) / effEntry
-        : (effEntry - exitPrice) / effEntry;
-      return pnl >= 0 ? 'WIN' : 'LOSS';
-    }
+  const future = candles.filter(c => c.time > entryTs)
+                         .slice(0, cfg.MAX_HOLD_HOURS * 4);
 
-    if (effTP != null) {
-      if (isBuy) {
-        if (c.low  <= sig.stop)     return 'LOSS'; // 市场触及止损价
-        if (c.high >= sig.bbTarget) return 'WIN';  // 市场触及目标价
-      } else {
-        if (c.high >= sig.stop)     return 'LOSS';
-        if (c.low  <= sig.bbTarget) return 'WIN';
+  for (const c of future) {
+    const hi = c.high, lo = c.low;
+
+    if (isBuy) {
+      if (lo <= trailStop) {
+        const pnlR = (trailStop - effEntry) / R;
+        return { status: pnlR >= 0 ? 'WIN' : 'LOSS', pnlR, closePrice: trailStop, closeTs: c.time };
+      }
+      if (hi > highWater) highWater = hi;
+      const profit = (highWater - effEntry) / R;
+      if (profit >= TRAIL_ACTIVATION && !trailActive) trailActive = true;
+      if (trailActive) {
+        const newStop = highWater - TRAIL_STEP * R;
+        if (newStop > trailStop) trailStop = newStop;
+      }
+    } else {
+      if (hi >= trailStop) {
+        const pnlR = (effEntry - trailStop) / R;
+        return { status: pnlR >= 0 ? 'WIN' : 'LOSS', pnlR, closePrice: trailStop, closeTs: c.time };
+      }
+      if (lo < highWater) highWater = lo;
+      const profit = (effEntry - highWater) / R;
+      if (profit >= TRAIL_ACTIVATION && !trailActive) trailActive = true;
+      if (trailActive) {
+        const newStop = highWater + TRAIL_STEP * R;
+        if (newStop < trailStop) trailStop = newStop;
       }
     }
   }
-  return 'EOD';  // 未能在窗口内结算
+
+  // 超时：按最后收盘价结算
+  const lastPrice = future.length > 0 ? future[future.length - 1].close : entry;
+  const exitPrice = isBuy ? lastPrice * (1 - COST) : lastPrice * (1 + COST);
+  const pnlR = isBuy
+    ? (exitPrice - effEntry) / R
+    : (effEntry - exitPrice) / R;
+  const status = pnlR >= cfg.TIMEOUT_R_RATIO ? 'WIN' : pnlR <= -cfg.TIMEOUT_R_RATIO ? 'LOSS' : 'DRAW';
+  return { status, pnlR, closePrice: lastPrice, closeTs: entryTs + cfg.MAX_HOLD_HOURS * 3600 * 1000 };
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -457,30 +478,21 @@ async function startBackfill() {
       if (ts - lastSigTs[sig.direction] < CFG.DEDUP_MINUTES * 60 * 1000) continue;
       lastSigTs[sig.direction] = ts;
 
-      const outcome = judgeOutcome(candles, i, sig);
+      const res = judgeOutcome(ts, sig.direction, sig.price, sig.stop, sig.bbTarget, candles, cfg);
       const timeStr = new Date(ts).toLocaleString('zh-CN', {
         month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'
       });
 
       sigCount++;
-      const icon = outcome === 'WIN' ? '✓' : outcome === 'LOSS' ? '✗' : '⏸';
-      log(`[${timeStr}] ${sig.direction} @$${sig.price.toFixed(0)} 分:${sig.score} → ${icon} ${outcome}`);
+      const icon = res.status === 'WIN' ? '✓' : res.status === 'LOSS' ? '✗' : '⏸';
+      log(`[${timeStr}] ${sig.direction} @$${sig.price.toFixed(0)} 分:${sig.score} → ${icon} ${res.status}  (${res.pnlR >= 0 ? '+' : ''}${res.pnlR.toFixed(2)}R)`);
 
       const isBuyDir = sig.direction === 'BUY';
       const effEntry = isBuyDir ? sig.price * (1 + COST) : sig.price * (1 - COST);
-      const effStop  = isBuyDir ? sig.stop * (1 - COST)  : sig.stop * (1 + COST);
-      const effTP    = sig.bbTarget != null
-        ? (isBuyDir ? sig.bbTarget * (1 - COST) : sig.bbTarget * (1 + COST))
-        : null;
+      const effStop  = isBuyDir ? sig.stop  * (1 - COST) : sig.stop  * (1 + COST);
 
-      // 计算R倍数（基于有效价格）
-      if (effTP != null && outcome !== 'EOD') {
-        const slDist = Math.abs(effEntry - effStop);
-        const tpDist = Math.abs(effTP - effEntry);
-        const rUnit  = slDist > 0 ? tpDist / slDist : 1;
-        if (outcome === 'WIN')  winRList.push(rUnit);
-        if (outcome === 'LOSS') lossRList.push(1);
-      }
+      if (res.status === 'WIN')  winRList.push(res.pnlR);
+      if (res.status === 'LOSS') lossRList.push(Math.abs(res.pnlR));
 
       resultJson.push({
         ts,
@@ -490,46 +502,49 @@ async function startBackfill() {
         score:     sig.score,
         price:     effEntry.toFixed(2),
         stop:      effStop.toFixed(2),
-        bbTarget:  effTP != null ? parseFloat(effTP.toFixed(2)) : null,
+        bbTarget:  null,  // 跟踪止损无固定TP
         rsi:       sig.rsi,
         bbPct:     sig.bbPct,
         emaTrend:  sig.emaTrend,
-        outcome,
+        outcome:   res.status,
+        pnlR:      parseFloat(res.pnlR.toFixed(3)),
       });
     }
 
     const wins   = resultJson.filter(s => s.outcome === 'WIN').length;
     const losses = resultJson.filter(s => s.outcome === 'LOSS').length;
+    const draws  = resultJson.filter(s => s.outcome === 'DRAW').length;
     const total  = wins + losses;
     const wr     = total > 0 ? wins / total : 0;
     const wrPct  = total > 0 ? (wr * 100).toFixed(1) : '--';
 
-    // 期望值
     const avgWinR  = winRList.length  > 0 ? winRList.reduce((a,b)=>a+b,0)  / winRList.length  : 0;
     const avgLossR = lossRList.length > 0 ? lossRList.reduce((a,b)=>a+b,0) / lossRList.length : 1;
+    const maxWinR  = winRList.length  > 0 ? Math.max(...winRList) : 0;
     const ev       = total > 0 ? wr * avgWinR - (1 - wr) * avgLossR : null;
+    const evSign   = ev != null ? (ev > 0 ? '✅ 正期望' : '❌ 负期望') : '';
 
     log(`\n${'─'.repeat(50)}`);
     log(`回放完成 [${cfg.name}]：共 ${sigCount} 笔信号`);
-    log(`已结算：${total} 笔  WIN ${wins}  LOSS ${losses}  胜率 ${wrPct}%`);
-    log(`平均盈利R：${avgWinR.toFixed(2)}  平均亏损R：${avgLossR.toFixed(2)}`);
-    log(`期望值：${ev != null ? ev.toFixed(3) : '--'} R  ${ev != null && ev > 0 ? '✓ 正期望' : ev != null ? '✗ 负期望' : ''}`);
-    log(`EOD强平：${resultJson.filter(s=>s.outcome==='EOD').length} 笔（计入历史但不计胜率）`);
+    log(`已结算：WIN ${wins}  LOSS ${losses}  DRAW ${draws}  胜率 ${wrPct}%`);
+    log(`平均盈利R：+${avgWinR.toFixed(2)}  平均亏损R：-${avgLossR.toFixed(2)}  最大单笔盈利R：+${maxWinR.toFixed(2)}`);
+    log(`期望值：${ev != null ? (ev >= 0 ? '+' : '') + ev.toFixed(3) : '--'} R  ${evSign}`);
     log(`单边成本：滑点${(SLIPPAGE*100).toFixed(2)}% + 手续费${(FEE*100).toFixed(2)}% = ${(COST*100).toFixed(2)}%（含止损）`);
+    log(`跟踪参数：激活=${cfg.TRAIL_ACTIVATION}R  步长=${cfg.TRAIL_STEP}R  超时=${cfg.MAX_HOLD_HOURS}h`);
 
     // 与基准对比
     if (presetKey === 'base') {
-      baseResultJson = { sigCount, total, wrPct, ev };
+      baseResultJson = { sigCount, total, wr, wrPct, ev };
     } else if (baseResultJson) {
       const dSig = sigCount - baseResultJson.sigCount;
       const dWR  = total > 0 && baseResultJson.total > 0
-        ? (parseFloat(wrPct) - parseFloat(baseResultJson.wrPct)).toFixed(1)
+        ? ((wr - baseResultJson.wr) * 100).toFixed(1)
         : '--';
       const dEV  = ev != null && baseResultJson.ev != null
         ? (ev - baseResultJson.ev).toFixed(3)
         : '--';
       log(`\n— 与基准对比 —`);
-      log(`信号数变化：${dSig >= 0 ? '+' : ''}${dSig}  胜率变化：${dWR >= 0 ? '+' : ''}${dWR}%  期望值变化：${dEV >= 0 ? '+' : ''}${dEV}R`);
+      log(`信号数：${dSig >= 0 ? '+' : ''}${dSig}  胜率：${dWR >= 0 ? '+' : ''}${dWR}%  期望值：${dEV >= 0 ? '+' : ''}${dEV}R`);
     }
 
     if (sigCount === 0) {
