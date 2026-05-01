@@ -476,6 +476,7 @@ footer {
         <div class="ind-section">
             <div class="ind-section-label">评分</div>
             <div class="pills-wrap" id="scorePills"></div>
+            <div style="margin-top:6px;font-size:11px;color:var(--text-muted)" id="bbWidthRow"></div>
         </div>
 
         <div class="ind-section">
@@ -1476,6 +1477,22 @@ function renderIndicatorPanel(sig) {
         return '<span class="' + cls + '" title="' + tip + '">' + p.name + ' ' + lbl + '</span>';
     }).join('');
 
+    // ── BB 带宽显示 ───────────────────────────────────────────
+    const bbwEl = document.getElementById('bbWidthRow');
+    if (bbwEl && bb) {
+        const bbwPct = bb.width * 100;
+        let bbwLabel, bbwColor;
+        if (bbwPct > 6) {
+            bbwLabel = '趋势'; bbwColor = bb.pct < 0.5 ? 'var(--red)' : 'var(--green)';
+        } else if (bbwPct > 4) {
+            bbwLabel = '扩张'; bbwColor = 'var(--yellow)';
+        } else {
+            bbwLabel = '震荡'; bbwColor = 'var(--text-muted)';
+        }
+        bbwEl.innerHTML = 'BBW&nbsp;<span style="font-family:var(--font-mono)">' + bbwPct.toFixed(1) + '%</span>'
+            + '&nbsp;<span style="color:' + bbwColor + ';font-weight:600">' + bbwLabel + '</span>';
+    }
+
     // ── Vote row ──────────────────────────────────────────────
     const voteRow = document.getElementById('voteRow');
     const vs = sig.votes;
@@ -1516,6 +1533,9 @@ function renderIndicatorPanel(sig) {
         { name: 'EMA 20/50',val: ema20.toFixed(0) + ' / ' + ema50.toFixed(0),
           sub: ema20 > ema50 ? '多头' : '空头',
           vote: 0, bar: null },
+        { name: 'BB带宽',    val: bb ? (bb.width * 100).toFixed(2) + '%' : '--',
+          sub: bb ? (bb.width * 100 > 6 ? '趋势行情' : bb.width * 100 > 4 ? '带宽扩张' : '震荡行情') : '--',
+          vote: 0, bar: bb ? Math.min(1, bb.width / 0.08) : 0 },
     ];
     const barColor = score => score >= 60 ? 'var(--green)' : score >= 30 ? 'var(--accent)' : 'var(--text-muted)';
     document.getElementById('detailRows').innerHTML = rows.map(r => {
