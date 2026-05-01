@@ -944,7 +944,7 @@ function riskCheck(direction, ema20, ema50) {
 }
 
 /* ── Signal engine ───────────────────────────────────────── */
-function generateSignal(closes, candles, volumes, cfg) {
+function generateSignal(closes, candles, volumes, cfg, h1Candles) {
     cfg = cfg || PRESETS.base;
     const last     = closes[closes.length - 1];
     const rsi      = calcRSI(closes);
@@ -1004,9 +1004,19 @@ function generateSignal(closes, candles, volumes, cfg) {
         rrRatio   = (cfg.TAKE_PROFIT_PCT / cfg.STOP_LOSS_PCT).toFixed(1);
     }
 
-    const finalRisk = (adx < cfg.ADX_MIN && risk.pass)
+    let finalRisk = (adx < cfg.ADX_MIN && risk.pass)
         ? { pass: false, reason: `ADX ${adx.toFixed(0)} < ${cfg.ADX_MIN}，震荡市，信号暂停` }
         : risk;
+
+    if (finalRisk.pass && h1Candles && h1Candles.length >= 55) {
+        const h1Closes = h1Candles.map(c => c.close);
+        const h1Ema20  = calcEMA(h1Closes, 20);
+        const h1Ema50  = calcEMA(h1Closes, 50);
+        if (direction === 'BUY'  && h1Ema20 <= h1Ema50)
+            finalRisk = { pass: false, reason: '1h趋势反向，信号降级' };
+        if (direction === 'SELL' && h1Ema20 >= h1Ema50)
+            finalRisk = { pass: false, reason: '1h趋势反向，信号降级' };
+    }
 
     const marketState = detectMarketState(bb, ema20, ema50, last);
 
@@ -1596,12 +1606,12 @@ async function runSignal() {
     if (signalRunning) return;
     signalRunning = true;
     try {
-        const candles = await fetchOHLC(15);
+        const [candles, h1Candles] = await Promise.all([fetchOHLC(15), fetchOHLC(60)]);
         const closes  = candles.map(c => c.close);
         const volumes = candles.map(c => c.volume);
 
         updateOpenSignals(candles);
-        const sig = generateSignal(closes, candles, volumes);
+        const sig = generateSignal(closes, candles, volumes, null, h1Candles);
         renderSignalCard(sig);
         renderInsightCard(sig);
         renderIndicatorPanel(sig);
