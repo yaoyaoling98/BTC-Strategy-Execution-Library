@@ -378,6 +378,10 @@ footer {
 .bt-log .win  { color:var(--green); }
 .bt-log .loss { color:var(--red); }
 .bt-log .draw { color:var(--text-muted); }
+.bt-ev-cmp { font-size:12px; color:var(--text-muted); margin-top:8px; padding-top:8px; border-top:1px solid var(--border-subtle); display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.bt-ev-cmp em { font-style:normal; font-family:var(--font-mono); }
+.bt-ev-cmp .pos { color:var(--green); }
+.bt-ev-cmp .neg { color:var(--red); }
 
 /* ── Position Calculator ───────────────────────────────────── */
 .pos-calc { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
@@ -580,6 +584,10 @@ footer {
       <div class="bt-stat"><div class="bt-stat-label">期望值</div><div class="bt-stat-val" id="btEV">—</div></div>
       <div class="bt-stat"><div class="bt-stat-label">平均盈R</div><div class="bt-stat-val pos" id="btAW">—</div></div>
       <div class="bt-stat"><div class="bt-stat-label">平均亏R</div><div class="bt-stat-val neg" id="btAL">—</div></div>
+    </div>
+    <div class="bt-ev-cmp" id="btEvCmp" style="display:none">
+      <span id="btEvCmpText">—</span>
+      <button class="bt-select" onclick="btResetBaseline()" style="margin-left:auto;font-size:11px">重置基准</button>
     </div>
     <div class="bt-log" id="btLog">点击「运行回测」从 OKX 拉取历史数据并回放策略…</div>
   </div>
@@ -1868,6 +1876,28 @@ async function runBacktest() {
     document.getElementById('btAL').textContent = losses.length > 0 ? '-'+alR.toFixed(3)+'R' : '—';
     stats.style.display = 'grid';
 
+    // EV 对比基准
+    const BT_BASELINE_KEY = 'bt_baseline_ev';
+    const cmpEl  = document.getElementById('btEvCmp');
+    const cmpTxt = document.getElementById('btEvCmpText');
+    if (ev != null) {
+      const baseline = localStorage.getItem(BT_BASELINE_KEY);
+      if (baseline === null) {
+        localStorage.setItem(BT_BASELINE_KEY, ev.toFixed(4));
+        cmpTxt.innerHTML = '首次运行，已记录为基准 <em>' + (ev>=0?'+':'') + ev.toFixed(3) + 'R</em>';
+      } else {
+        const base = parseFloat(baseline);
+        const diff = ev - base;
+        const sign = diff >= 0 ? '+' : '';
+        const cls  = diff > 0 ? 'pos' : diff < 0 ? 'neg' : '';
+        const arr  = diff > 0 ? '↑' : diff < 0 ? '↓' : '→';
+        cmpTxt.innerHTML = '基准期望值：<em>' + (base>=0?'+':'') + base.toFixed(3) + 'R</em>'
+          + ' → 当前：<em>' + (ev>=0?'+':'') + ev.toFixed(3) + 'R</em>'
+          + '　变化：<em class="' + cls + '">' + sign + diff.toFixed(3) + 'R ' + arr + '</em>';
+      }
+      cmpEl.style.display = 'flex';
+    }
+
     log.innerHTML += `<br>─── 完成 [${cfg.name}] ─── 信号:${results.length} WIN:${wins.length} LOSS:${losses.length} 胜率:${total>0?(wr*100).toFixed(1)+'%':'—'} 期望:${ev!=null?(ev>=0?'+':'')+ev.toFixed(3)+'R':'—'}`;
     log.scrollTop = log.scrollHeight;
 
@@ -1877,6 +1907,12 @@ async function runBacktest() {
     btn.disabled    = false;
     btn.textContent = '▶ 运行回测';
   }
+}
+
+function btResetBaseline() {
+  localStorage.removeItem('bt_baseline_ev');
+  const cmpEl = document.getElementById('btEvCmp');
+  if (cmpEl) cmpEl.style.display = 'none';
 }</script>
 </body>
 </html>
