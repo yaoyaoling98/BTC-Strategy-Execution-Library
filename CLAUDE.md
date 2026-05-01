@@ -66,12 +66,9 @@ BTC/USD 均值回归信号系统，接入 Kraken 公开 API，纯前端单文件
 ## 文件结构
 
 ```
-btc-signal-v2.html        # ★ 正式版 — 唯一维护对象
-backfill.html             # 冷启动工具 — 回填90天历史信号到localStorage
-backtest.py               # 策略回测脚本 — OKX数据，MA200牛熊过滤
-README.md                 # 项目说明
-CLAUDE.md                 # 本文件（AI 开发指引）
-archive/                  # 归档目录（已废弃文件，勿引用）
+btc-signal-v2.html   # ★ 唯一维护文件 — 双击打开，零依赖
+                     #   包含：实盘信号面板 + 内置回测引擎（OKX数据）
+archive/             # 归档目录，勿引用
 ```
 
 > 根目录不得出现其他 .html 文件。新增功能在 btc-signal-v2.html 内扩展，不新建文件。
