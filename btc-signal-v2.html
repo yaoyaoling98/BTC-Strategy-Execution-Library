@@ -1296,73 +1296,64 @@ function renderInsightCard(sig) {
     const isBuy       = sig.direction === 'BUY';
     const vs          = sig.votes;
     const fmtP        = v => '$' + Number(v).toLocaleString('en-US',
+        { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    const fmtP2       = v => '$' + Number(v).toLocaleString('en-US',
         { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    if (!aboveThresh || isBlocked) {
-        if (isBlocked && aboveThresh) {
-            // 评分达标但被风控拦截
-            parts.push('<div class="ic-title">📊 当前状态：评分达标，已拦截</div>');
-            parts.push('<div class="ic-row">➜ 评分 <em>' + score + '/100</em> 已达到触发条件</div>');
-            parts.push('<div class="ic-row ic-warn">➜ ⚠️ 风控拦截：' + sig.risk.reason + '</div>');
-        } else {
-            // 评分未达标（无论是否拦截）
-            parts.push('<div class="ic-title">📊 当前状态：观望中</div>');
+    if (isBlocked && aboveThresh) {
+        // 评分达标但被风控拦截
+        parts.push('<div class="ic-title">📊 评分达标 — 已拦截</div>');
+        parts.push('<div class="ic-row ic-warn">⚠️ ' + sig.risk.reason + '</div>');
+    } else if (!aboveThresh) {
+        // 观望：距离触发差几分，哪几个指标未对齐
+        parts.push('<div class="ic-title">📊 当前状态：观望中</div>');
+        const gap    = Math.max(0, PRESETS.base.SIG_THRESHOLD - score);
+        const dirTxt = isBuy ? '做多' : sig.direction === 'SELL' ? '做空' : '交易';
+        parts.push('<div class="ic-row">➜ 距 <em>' + dirTxt + '</em> 信号还差 <em>'
+            + gap + ' 分</em>（当前 <em>' + score + '/100</em>，需 ≥ '
+            + PRESETS.base.SIG_THRESHOLD + '）</div>');
 
-            const gap    = Math.max(0, PRESETS.base.SIG_THRESHOLD - score);
-            const dirTxt = sig.direction === 'BUY' ? '买入' : sig.direction === 'SELL' ? '卖出' : '交易';
-            parts.push('<div class="ic-row">➜ 距离' + dirTxt + '信号还差 <em>' + gap
-                + ' 分</em>（当前 <em>' + score + '/100</em>，需 ≥' + PRESETS.base.SIG_THRESHOLD + '）</div>');
-
-            const bullNames = [], bearNames = [];
-            if (vs.rsi  > 0) bullNames.push('RSI');  else if (vs.rsi  < 0) bearNames.push('RSI');
-            if (vs.bb   > 0) bullNames.push('BB');   else if (vs.bb   < 0) bearNames.push('BB');
-            if (vs.vwap > 0) bullNames.push('VWAP'); else if (vs.vwap < 0) bearNames.push('VWAP');
-            if (vs.mfi  > 0) bullNames.push('MFI');  else if (vs.mfi  < 0) bearNames.push('MFI');
-
-            let voteTxt;
-            if (bullNames.length > bearNames.length) {
-                voteTxt = '4 个指标里 <em>' + bullNames.length + ' 个</em>倾向做多（'
-                    + bullNames.join('、') + '），需要更多确认';
-            } else if (bearNames.length > bullNames.length) {
-                voteTxt = '4 个指标里 <em>' + bearNames.length + ' 个</em>倾向做空（'
-                    + bearNames.join('、') + '），需要更多确认';
-            } else if (bullNames.length === 0) {
-                voteTxt = '4 个指标暂无明确方向，多空分歧';
-            } else {
-                voteTxt = '4 个指标多空分歧（各 <em>' + bullNames.length + ' 票</em>），继续观察';
-            }
-            parts.push('<div class="ic-row">➜ ' + voteTxt + '</div>');
-            parts.push('<div class="ic-row">➜ 没有可执行的交易，继续等待</div>');
-        }
+        // 未对齐的指标
+        const notAligned = [];
+        if (isBuy  && vs.rsi  <= 0) notAligned.push('RSI（未超卖）');
+        if (!isBuy && vs.rsi  >= 0) notAligned.push('RSI（未超买）');
+        if (isBuy  && vs.bb   <= 0) notAligned.push('BB（未触下轨）');
+        if (!isBuy && vs.bb   >= 0) notAligned.push('BB（未触上轨）');
+        if (isBuy  && vs.vwap <= 0) notAligned.push('VWAP（价格未跌破）');
+        if (!isBuy && vs.vwap >= 0) notAligned.push('VWAP（价格未突破）');
+        if (isBuy  && vs.mfi  <= 0) notAligned.push('MFI（资金未流出）');
+        if (!isBuy && vs.mfi  >= 0) notAligned.push('MFI（资金未流入）');
+        if (notAligned.length > 0)
+            parts.push('<div class="ic-row">➜ 未对齐：<em>' + notAligned.join('、') + '</em></div>');
+        parts.push('<div class="ic-row">➜ 没有可执行的交易，继续等待</div>');
     } else {
+        // 信号触发
         const titleCls = isBuy ? 'ic-buy' : 'ic-sell';
-        const titleTxt = isBuy ? '🟢 买入信号触发！' : '🔴 卖出信号触发！';
+        const titleTxt = isBuy
+            ? '🟢 做多信号（评分 ' + score + '）'
+            : '🔴 做空信号（评分 ' + score + '）';
         parts.push('<div class="ic-title ' + titleCls + '">' + titleTxt + '</div>');
 
         const entryP    = sig.raw.last;
-        const stopPrice = isBuy ? sig.stopLong : sig.stopShort;
-        const tpPrice   = isBuy ? sig.tpLong   : sig.tpShort;
-        const slPct     = (Math.abs(entryP - parseFloat(stopPrice)) / entryP * 100).toFixed(1);
+        const limitP    = isBuy ? entryP * 0.995 : entryP * 1.005;
+        const stopPrice = parseFloat(isBuy ? sig.stopLong : sig.stopShort);
+        const slPct     = (Math.abs(entryP - stopPrice) / entryP * 100).toFixed(2);
 
-        parts.push('<div class="ic-row">➜ 进场 <em>' + fmtP(entryP)
-            + '</em>　止损 <em>' + fmtP(stopPrice) + '</em>　目标 <em>' + fmtP(tpPrice)
-            + '</em>　盈亏比 <em>1:' + sig.rrRatio + '</em></div>');
-
-        parts.push('<div class="ic-row">➜ 盈亏比 1：<em>' + sig.rrRatio
-            + '</em>　预期最大亏损 <em>' + slPct + '%</em></div>');
+        parts.push('<div class="ic-row">➜ 入场　市价 <em>' + fmtP(entryP)
+            + '</em>　或挂单 <em>' + fmtP2(limitP) + '</em></div>');
+        parts.push('<div class="ic-row">➜ 止损　<em>' + fmtP2(stopPrice)
+            + '</em>　（距入场 <em>' + slPct + '%</em>）跟踪止损，盈利 0.5R 后开始移动</div>');
+        parts.push('<div class="ic-row">➜ 止损状态　<em>等待激活</em></div>');
 
         const hist     = loadHistory();
         const resolved = hist.filter(r => r.outcome === 'WIN' || r.outcome === 'LOSS');
         const wins     = resolved.filter(r => r.outcome === 'WIN').length;
-        let wrTxt;
         if (resolved.length >= 3) {
-            wrTxt = '历史相似信号胜率 <em>' + (wins / resolved.length * 100).toFixed(0)
-                + '%</em>（' + wins + ' 胜 ' + (resolved.length - wins) + ' 负）';
-        } else {
-            wrTxt = '历史样本不足，胜率统计暂无参考价值';
+            parts.push('<div class="ic-row">➜ 历史胜率 <em>'
+                + (wins / resolved.length * 100).toFixed(0)
+                + '%</em>（' + wins + ' 胜 ' + (resolved.length - wins) + ' 负）</div>');
         }
-        parts.push('<div class="ic-row">➜ ' + wrTxt + '</div>');
-        parts.push('<div class="ic-note">⚠️ 提示：这是机器信号，实盘前请人工确认</div>');
+        parts.push('<div class="ic-note">⚠️ 机器信号，实盘前请人工确认</div>');
     }
 
     el.innerHTML = parts.join('');
