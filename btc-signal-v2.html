@@ -408,6 +408,14 @@ footer {
     font-size: 13px; color: var(--text-muted);
     margin-top: 8px;
 }
+.ic-row.ic-trend-warn { color: var(--yellow); font-weight: 600; margin-top: 4px; }
+.mkt-badge {
+    font-size: 11px; font-weight: 700; padding: 2px 8px;
+    border-radius: 10px; letter-spacing: .5px;
+}
+.mkt-badge.ranging  { background: var(--bg-hover); color: var(--text-muted); border: 1px solid var(--border-default); }
+.mkt-badge.trend-up { background: rgba(38,166,154,.18); color: var(--green); border: 1px solid var(--green); }
+.mkt-badge.trend-dn { background: rgba(239,83,80,.18);  color: var(--red);   border: 1px solid var(--red); }
 </style>
 </head>
 <body>
@@ -422,6 +430,7 @@ footer {
         <span id="tb-change" class="chg-badge">--</span>
     </div>
     <div class="hdr-r">
+        <span id="mktBadge" class="mkt-badge ranging" style="display:none">震荡市</span>
         <span class="hdr-countdown">
             <span id="nextTicker">--s</span> · <span id="nextSignal">--s</span>
         </span>
@@ -999,13 +1008,25 @@ function generateSignal(closes, candles, volumes, cfg) {
         ? { pass: false, reason: `ADX ${adx.toFixed(0)} < ${cfg.ADX_MIN}，震荡市，信号暂停` }
         : risk;
 
+    const marketState = detectMarketState(bb, ema20, ema50, last);
+
     return {
         score: totalScore, direction, strength, risk: finalRisk,
         scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, mfi: mfiR.score, vBonus },
         votes:  { rsi: rsiR.vote,  bb: bbR.vote,  vwap: vwapR.vote,  mfi: mfiR.vote  },
         raw:    { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last },
-        stopLong, stopShort, tpLong, tpShort, rrRatio,
+        stopLong, stopShort, tpLong, tpShort, rrRatio, marketState,
     };
+}
+
+function detectMarketState(bb, ema20, ema50, price) {
+    if (!bb || !price) return 'RANGING';
+    const bbWidth = (bb.upper - bb.lower) / bb.middle;
+    const spread  = Math.abs(ema20 - ema50) / price;
+    if (bbWidth > 0.04 && spread > 0.008) {
+        return ema20 > ema50 ? 'TRENDING_UP' : 'TRENDING_DOWN';
+    }
+    return 'RANGING';
 }
 
 /* ================================================================
@@ -1334,6 +1355,10 @@ function renderInsightCard(sig) {
             : '🔴 做空信号（评分 ' + score + '）';
         parts.push('<div class="ic-title ' + titleCls + '">' + titleTxt + '</div>');
 
+        if (sig.marketState === 'TRENDING_UP' || sig.marketState === 'TRENDING_DOWN') {
+            parts.push('<div class="ic-row ic-trend-warn">趋势市 — 均值回归胜率下降，建议观望</div>');
+        }
+
         const entryP    = sig.raw.last;
         const limitP    = isBuy ? entryP * 0.995 : entryP * 1.005;
         const stopPrice = parseFloat(isBuy ? sig.stopLong : sig.stopShort);
@@ -1580,6 +1605,7 @@ async function runSignal() {
         renderSignalCard(sig);
         renderInsightCard(sig);
         renderIndicatorPanel(sig);
+        updateMktBadge(sig.marketState);
         logSignal(sig);
         renderHistory();
         renderStatusFooter();
@@ -1587,6 +1613,22 @@ async function runSignal() {
         document.getElementById('sfConn').textContent = '数据错误：' + err.message;
     } finally {
         signalRunning = false;
+    }
+}
+
+function updateMktBadge(state) {
+    const el = document.getElementById('mktBadge');
+    if (!el) return;
+    el.style.display = '';
+    if (state === 'TRENDING_UP') {
+        el.className = 'mkt-badge trend-up';
+        el.textContent = '趋势↑';
+    } else if (state === 'TRENDING_DOWN') {
+        el.className = 'mkt-badge trend-dn';
+        el.textContent = '趋势↓';
+    } else {
+        el.className = 'mkt-badge ranging';
+        el.textContent = '震荡市';
     }
 }
 
