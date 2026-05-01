@@ -379,6 +379,19 @@ footer {
 .bt-log .loss { color:var(--red); }
 .bt-log .draw { color:var(--text-muted); }
 
+/* ── Position Calculator ───────────────────────────────────── */
+.pos-calc { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
+.pos-calc-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pos-calc-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.pos-calc-input {
+    font-size: 13px; font-family: var(--font-mono); padding: 4px 10px;
+    background: var(--bg-hover); border: 1px solid var(--border-default);
+    border-radius: var(--r); color: var(--text-primary); width: 120px;
+}
+.pos-calc-result { font-size: 13px; color: var(--text-secondary); margin-top: 6px; }
+.pos-calc-result em { color: var(--text-primary); font-style: normal; font-family: var(--font-mono); }
+.pos-calc-result .warn-loss { color: var(--red); font-weight: 600; }
+
 /* ── Insight Card ──────────────────────────────────────────── */
 .insight-card {
     margin: 0 16px 12px;
@@ -487,6 +500,13 @@ footer {
             <div id="scoreLegend" class="score-legend"></div>
             <div id="blockedReason" class="blocked-reason" style="display:none"></div>
             <div id="entryTable" class="entry-tbl" style="display:none"></div>
+            <div class="pos-calc">
+                <div class="pos-calc-row">
+                    <span class="pos-calc-label">账户净值 USD</span>
+                    <input class="pos-calc-input" id="posEquity" type="number" placeholder="10000" oninput="calcPositionSize()">
+                </div>
+                <div class="pos-calc-result" id="posResult">输入账户净值后显示建议仓位…</div>
+            </div>
         </div>
         <div class="stats-row">
             <div class="stat-item">
@@ -1624,6 +1644,45 @@ async function runSignal() {
     } finally {
         signalRunning = false;
     }
+}
+
+function calcPositionSize() {
+    const el     = document.getElementById('posResult');
+    const equity = parseFloat(document.getElementById('posEquity').value);
+    if (!equity || equity <= 0) { el.innerHTML = '输入账户净值后显示建议仓位…'; return; }
+
+    const hist     = loadHistory();
+    const resolved = hist.filter(r => r.outcome === 'WIN' || r.outcome === 'LOSS').slice(-20);
+
+    if (resolved.length < 10) {
+        el.innerHTML = '历史样本不足，建议固定 <em>1%</em> 仓位（≈ $'
+            + (equity * 0.01).toFixed(0) + ')';
+        return;
+    }
+
+    const wins   = resolved.filter(r => r.outcome === 'WIN');
+    const losses = resolved.filter(r => r.outcome === 'LOSS');
+    const W      = wins.length / resolved.length;
+    const avgW   = wins.length   > 0 ? wins.reduce((s, r)   => s + (r.pnlR || 1), 0) / wins.length   : 1;
+    const avgL   = losses.length > 0 ? losses.reduce((s, r) => s + Math.abs(r.pnlR || 1), 0) / losses.length : 1;
+    const kelly  = Math.max(0, W - (1 - W) / (avgW / avgL));
+    const frac   = kelly * 0.25;
+
+    const priceEl = document.getElementById('tb-price');
+    const price   = parseFloat(priceEl ? priceEl.dataset.last : 0) || 0;
+    const posUSD  = equity * frac;
+    const posBTC  = price > 0 ? posUSD / price : 0;
+
+    const last3 = resolved.slice(-3);
+    const streak = last3.length === 3 && last3.every(r => r.outcome === 'LOSS');
+
+    let html = '建议仓位 <em>$' + posUSD.toFixed(0) + '</em>'
+        + (posBTC > 0 ? '（≈ <em>' + posBTC.toFixed(4) + ' BTC</em>）' : '')
+        + ' — 凯利 ' + (kelly * 100).toFixed(1) + '% × 0.25 保守系数';
+    if (streak)
+        html += '<br><span class="warn-loss">⚠ 连亏警告，建议减半：$' + (posUSD / 2).toFixed(0) + '</span>';
+
+    el.innerHTML = html;
 }
 
 function updateMktBadge(state) {
