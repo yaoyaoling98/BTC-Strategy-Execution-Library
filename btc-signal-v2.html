@@ -359,6 +359,26 @@ footer {
 #sfWinRate { font-family: var(--font-mono); }
 #sfUpdate  { margin-left: auto; }
 
+/* ── Backtest Panel ────────────────────────────────────────── */
+.bt-panel { margin: 12px 16px; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--r); overflow: hidden; }
+.bt-header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border-subtle); }
+.bt-label { font-size:11px; font-weight:600; color:var(--text-muted); letter-spacing:1px; text-transform:uppercase; }
+.bt-select { font-size:11px; padding:3px 8px; border-radius:var(--r); background:var(--bg-hover); border:1px solid var(--border-default); color:var(--text-secondary); cursor:pointer; }
+.bt-run-btn { font-size:11px; font-weight:600; padding:4px 12px; border-radius:var(--r); background:var(--accent); border:none; color:#fff; letter-spacing:.5px; cursor:pointer; }
+.bt-run-btn:disabled { opacity:.4; cursor:not-allowed; }
+.bt-body { padding:14px 16px; }
+.bt-stats { display:grid; grid-template-columns:repeat(5,1fr); gap:0; border:1px solid var(--border-default); border-radius:var(--r); overflow:hidden; }
+.bt-stat { padding:10px 12px; border-right:1px solid var(--border-subtle); }
+.bt-stat:last-child { border-right:none; }
+.bt-stat-label { font-size:10px; color:var(--text-muted); letter-spacing:1px; text-transform:uppercase; margin-bottom:3px; }
+.bt-stat-val { font-family:var(--font-mono); font-size:14px; font-weight:600; color:var(--text-primary); }
+.bt-stat-val.pos { color:var(--green); }
+.bt-stat-val.neg { color:var(--red); }
+.bt-log { margin-top:12px; max-height:180px; overflow-y:auto; font-family:var(--font-mono); font-size:11px; color:var(--text-muted); line-height:1.8; }
+.bt-log .win  { color:var(--green); }
+.bt-log .loss { color:var(--red); }
+.bt-log .draw { color:var(--text-muted); }
+
 /* ── Insight Card ──────────────────────────────────────────── */
 .insight-card {
     margin: 0 16px 12px;
@@ -410,6 +430,7 @@ footer {
             <span id="newsLabel">消息面关</span>
         </label>
         <button class="hdr-btn" onclick="runSignal()">↻ 刷新</button>
+        <button class="hdr-btn" onclick="document.getElementById('btPanel').style.display='block'">回测</button>
     </div>
 </header>
 
@@ -504,6 +525,36 @@ footer {
     <span id="sfWinRate">—</span>
     <span id="sfUpdate" style="margin-left:auto">—</span>
 </footer>
+
+<!-- ── Backtest Panel ───────────────────────────────────────── -->
+<div class="bt-panel" id="btPanel" style="display:none">
+  <div class="bt-header">
+    <span class="bt-label">内置回测</span>
+    <select class="bt-select" id="btDays">
+      <option value="30">30天</option>
+      <option value="60">60天</option>
+      <option value="90" selected>90天</option>
+    </select>
+    <select class="bt-select" id="btPreset">
+      <option value="base">基准</option>
+      <option value="A">A组高胜率</option>
+      <option value="B">B组平衡</option>
+      <option value="C">C组保守</option>
+    </select>
+    <button class="bt-run-btn" id="btRunBtn" onclick="runBacktest()">▶ 运行回测</button>
+    <button class="hdr-btn" onclick="document.getElementById('btPanel').style.display='none'" style="margin-left:auto">✕</button>
+  </div>
+  <div class="bt-body">
+    <div class="bt-stats" id="btStats" style="display:none">
+      <div class="bt-stat"><div class="bt-stat-label">信号数</div><div class="bt-stat-val" id="btN">—</div></div>
+      <div class="bt-stat"><div class="bt-stat-label">胜率</div><div class="bt-stat-val" id="btWR">—</div></div>
+      <div class="bt-stat"><div class="bt-stat-label">期望值</div><div class="bt-stat-val" id="btEV">—</div></div>
+      <div class="bt-stat"><div class="bt-stat-label">平均盈R</div><div class="bt-stat-val pos" id="btAW">—</div></div>
+      <div class="bt-stat"><div class="bt-stat-label">平均亏R</div><div class="bt-stat-val neg" id="btAL">—</div></div>
+    </div>
+    <div class="bt-log" id="btLog">点击「运行回测」从 OKX 拉取历史数据并回放策略…</div>
+  </div>
+</div>
 
 <script>
 'use strict';
@@ -1573,6 +1624,140 @@ runSignal();
 renderInsightCard(null);
 renderHistory();
 renderStatusFooter();
-startTimers();</script>
+startTimers();
+
+/* ── 内置回测引擎 ──────────────────────────────────────────── */
+const BT_SLIPPAGE = 0.0010;
+const BT_FEE      = 0.0026;
+const BT_COST     = BT_SLIPPAGE + BT_FEE;
+
+async function btFetchCandles(days) {
+  const endTime   = Date.now();
+  const startTime = endTime - days * 86400 * 1000;
+  const LIMIT     = 100;
+  const STEP      = LIMIT * 15 * 60 * 1000;
+  let   all       = [];
+  let   winStart  = startTime;
+  while (winStart < endTime) {
+    const winEnd = Math.min(winStart + STEP, endTime);
+    const url    = `https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT&bar=15m&limit=${LIMIT}&after=${winEnd}&before=${winStart}`;
+    const resp   = await fetch(url);
+    const json   = await resp.json();
+    if (json.data && json.data.length) {
+      for (const c of json.data) {
+        all.push({ time:parseInt(c[0]), open:parseFloat(c[1]), high:parseFloat(c[2]), low:parseFloat(c[3]), close:parseFloat(c[4]), volume:parseFloat(c[5]) });
+      }
+    }
+    winStart = winEnd + 1;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  const seen = new Set();
+  all = all.filter(c => seen.has(c.time) ? false : seen.add(c.time));
+  all.sort((a, b) => a.time - b.time);
+  return all;
+}
+
+function btJudgeOutcome(entryTs, direction, entry, sl, candles, cfg) {
+  const isBuy   = direction === 'BUY';
+  const TRAIL_ACTIVATION = cfg.TRAIL_ACTIVATION ?? 0.5;
+  const TRAIL_STEP       = cfg.TRAIL_STEP       ?? 0.35;
+  const effEntry  = isBuy ? entry*(1+BT_COST) : entry*(1-BT_COST);
+  const slDist    = Math.min(Math.abs(entry-sl), entry*0.012);
+  const initSL    = isBuy ? entry-slDist : entry+slDist;
+  const effInitSL = isBuy ? initSL*(1-BT_COST) : initSL*(1+BT_COST);
+  const R         = Math.abs(effEntry-effInitSL);
+  if (R === 0) return { status:'DRAW', pnlR:0 };
+  let trailStop = initSL, highWater = entry, trailActive = false;
+  const future = candles.filter(c => c.time > entryTs).slice(0, cfg.MAX_HOLD_HOURS*4);
+  for (const c of future) {
+    if (isBuy) {
+      if (c.low <= trailStop) { const e=trailStop*(1-BT_COST); const p=(e-effEntry)/R; return {status:p>=0?'WIN':'LOSS',pnlR:p}; }
+      if (c.high > highWater) highWater = c.high;
+      const profit = (highWater*(1-BT_COST)-effEntry)/R;
+      if (!trailActive && profit >= TRAIL_ACTIVATION) { trailActive=true; const ip=entry-0.2*R; if(ip>trailStop) trailStop=ip; }
+      if (trailActive) { const ns=highWater-TRAIL_STEP*R; if(ns>trailStop) trailStop=ns; }
+    } else {
+      if (c.high >= trailStop) { const e=trailStop*(1+BT_COST); const p=(effEntry-e)/R; return {status:p>=0?'WIN':'LOSS',pnlR:p}; }
+      if (c.low < highWater) highWater = c.low;
+      const profit = (effEntry-highWater*(1+BT_COST))/R;
+      if (!trailActive && profit >= TRAIL_ACTIVATION) { trailActive=true; const ip=entry+0.2*R; if(ip<trailStop) trailStop=ip; }
+      if (trailActive) { const ns=highWater+TRAIL_STEP*R; if(ns<trailStop) trailStop=ns; }
+    }
+  }
+  const lp = future.length > 0 ? future[future.length-1].close : entry;
+  const exitEff = isBuy ? lp*(1-BT_COST) : lp*(1+BT_COST);
+  const pnlR = isBuy ? (exitEff-effEntry)/R : (effEntry-exitEff)/R;
+  const status = pnlR >= cfg.TIMEOUT_R_RATIO ? 'WIN' : pnlR <= -cfg.TIMEOUT_R_RATIO ? 'LOSS' : 'DRAW';
+  return { status, pnlR };
+}
+
+async function runBacktest() {
+  const days      = parseInt(document.getElementById('btDays').value);
+  const presetKey = document.getElementById('btPreset').value;
+  const cfg       = PRESETS[presetKey];
+  const btn       = document.getElementById('btRunBtn');
+  const log       = document.getElementById('btLog');
+  const stats     = document.getElementById('btStats');
+
+  btn.disabled = true;
+  btn.textContent = '拉取数据中…';
+  stats.style.display = 'none';
+  log.innerHTML = '正在从 OKX 拉取 BTC-USDT 15m K线…';
+
+  try {
+    const candles = await btFetchCandles(days);
+    log.innerHTML += `<br>拉取完成：${candles.length} 根K线，开始回放…<br>`;
+
+    const WARMUP   = 71;
+    const DEDUP_MS = 30 * 60 * 1000;
+    let lastSigTs  = { BUY: 0, SELL: 0 };
+    const results  = [];
+
+    for (let i = WARMUP; i < candles.length - 1; i++) {
+      const slice   = candles.slice(0, i+1);
+      const closes  = slice.map(c => c.close);
+      const volumes = slice.map(c => c.volume);
+      const sig     = generateSignal(closes, slice, volumes, cfg);
+      if (!sig || sig.score < cfg.SIG_THRESHOLD || !sig.risk.pass) continue;
+      const ts = candles[i].time;
+      const dir = sig.direction;
+      if (ts - lastSigTs[dir] < DEDUP_MS) continue;
+      lastSigTs[dir] = ts;
+      const stop = dir === 'BUY' ? sig.stopLong : sig.stopShort;
+      const res  = btJudgeOutcome(ts, dir, sig.raw.last, parseFloat(stop), candles, cfg);
+      results.push({ ts, dir, score: sig.score, price: sig.raw.last, ...res });
+      const icon = res.status === 'WIN' ? '<span class="win">✓</span>' : res.status === 'LOSS' ? '<span class="loss">✗</span>' : '<span class="draw">⏸</span>';
+      const time = new Date(ts).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+      log.innerHTML += `${icon} [${time}] ${dir} @$${sig.raw.last.toFixed(0)} 分:${sig.score} → ${res.status} (${res.pnlR>=0?'+':''}${res.pnlR.toFixed(2)}R)<br>`;
+      log.scrollTop = log.scrollHeight;
+    }
+
+    const wins   = results.filter(r => r.status==='WIN');
+    const losses = results.filter(r => r.status==='LOSS');
+    const total  = wins.length + losses.length;
+    const wr     = total > 0 ? wins.length/total : 0;
+    const awR    = wins.length   > 0 ? wins.reduce((s,r)=>s+r.pnlR,0)/wins.length   : 0;
+    const alR    = losses.length > 0 ? losses.reduce((s,r)=>s+Math.abs(r.pnlR),0)/losses.length : 0;
+    const ev     = total > 0 ? wr*awR - (1-wr)*alR : null;
+
+    document.getElementById('btN').textContent  = results.length;
+    document.getElementById('btWR').textContent = total > 0 ? (wr*100).toFixed(1)+'%' : '—';
+    const evEl = document.getElementById('btEV');
+    evEl.textContent = ev != null ? (ev>=0?'+':'')+ev.toFixed(3)+'R' : '—';
+    evEl.className   = 'bt-stat-val ' + (ev > 0 ? 'pos' : ev < 0 ? 'neg' : '');
+    document.getElementById('btAW').textContent = wins.length   > 0 ? '+'+awR.toFixed(3)+'R' : '—';
+    document.getElementById('btAL').textContent = losses.length > 0 ? '-'+alR.toFixed(3)+'R' : '—';
+    stats.style.display = 'grid';
+
+    log.innerHTML += `<br>─── 完成 [${cfg.name}] ─── 信号:${results.length} WIN:${wins.length} LOSS:${losses.length} 胜率:${total>0?(wr*100).toFixed(1)+'%':'—'} 期望:${ev!=null?(ev>=0?'+':'')+ev.toFixed(3)+'R':'—'}`;
+    log.scrollTop = log.scrollHeight;
+
+  } catch(err) {
+    log.innerHTML += `<br><span class="loss">错误：${err.message}</span>`;
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = '▶ 运行回测';
+  }
+}</script>
 </body>
 </html>
