@@ -1890,10 +1890,11 @@ async function runBacktest() {
       lastSigTs[dir] = ts;
       const stop = dir === 'BUY' ? sig.stopLong : sig.stopShort;
       const res  = btJudgeOutcome(ts, dir, sig.raw.last, parseFloat(stop), candles, cfg);
-      results.push({ ts, dir, score: sig.score, price: sig.raw.last, ...res });
+      results.push({ ts, dir, score: sig.score, price: sig.raw.last, marketState: sig.marketState, ...res });
       const icon = res.status === 'WIN' ? '<span class="win">✓</span>' : res.status === 'LOSS' ? '<span class="loss">✗</span>' : '<span class="draw">⏸</span>';
       const time = new Date(ts).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-      log.innerHTML += `${icon} [${time}] ${dir} @$${sig.raw.last.toFixed(0)} 分:${sig.score} → ${res.status} (${res.pnlR>=0?'+':''}${res.pnlR.toFixed(2)}R)<br>`;
+      const mktTag = sig.marketState === 'RANGING' ? '' : sig.marketState === 'TRENDING_UP' ? ' <span style="color:var(--green)">[趋势↑]</span>' : ' <span style="color:var(--red)">[趋势↓]</span>';
+      log.innerHTML += `${icon} [${time}] ${dir} @$${sig.raw.last.toFixed(0)} 分:${sig.score}${mktTag} → ${res.status} (${res.pnlR>=0?'+':''}${res.pnlR.toFixed(2)}R)<br>`;
       log.scrollTop = log.scrollHeight;
     }
 
@@ -1937,6 +1938,25 @@ async function runBacktest() {
     }
 
     log.innerHTML += `<br>─── 完成 [${cfg.name}] ─── 信号:${results.length} WIN:${wins.length} LOSS:${losses.length} 胜率:${total>0?(wr*100).toFixed(1)+'%':'—'} 期望:${ev!=null?(ev>=0?'+':'')+ev.toFixed(3)+'R':'—'}`;
+
+    // 市场状态分组统计
+    const states = ['RANGING', 'TRENDING_UP', 'TRENDING_DOWN'];
+    const stateLabel = { RANGING: 'RANGING    ', TRENDING_UP: 'TRENDING_UP', TRENDING_DOWN: 'TRENDING_DN' };
+    const hasAny = results.some(r => r.marketState);
+    if (hasAny) {
+      log.innerHTML += '<br><br>市场状态分解：';
+      for (const st of states) {
+        const grp  = results.filter(r => r.marketState === st);
+        if (grp.length === 0) continue;
+        const gW   = grp.filter(r => r.status === 'WIN').length;
+        const gL   = grp.filter(r => r.status === 'LOSS').length;
+        const gT   = gW + gL;
+        const gWR  = gT > 0 ? (gW / gT * 100).toFixed(0) + '%' : '—';
+        const color = st === 'TRENDING_UP' ? 'var(--green)' : st === 'TRENDING_DOWN' ? 'var(--red)' : 'var(--text-muted)';
+        log.innerHTML += `<br><span style="color:${color}">${stateLabel[st]}</span>  ${grp.length}笔  WIN:${gW} LOSS:${gL}  胜率${gWR}`;
+      }
+    }
+
     log.scrollTop = log.scrollHeight;
 
   } catch(err) {
