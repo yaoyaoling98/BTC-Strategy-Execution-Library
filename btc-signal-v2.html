@@ -609,7 +609,8 @@ const PRESETS = {
         ATR_SL_MULT: 1.0, ATR_TP_MULT: 1.5,
         ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
         ENTRY_DISTANCE_PCT: 0,
-        MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
+        MAX_HOLD_HOURS: 48, TIMEOUT_R_RATIO: 0.5,
+        TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
     },
     A: {
         name: 'A组高胜率',
@@ -619,7 +620,8 @@ const PRESETS = {
         ATR_SL_MULT: 1.7, ATR_TP_MULT: 1.1,
         ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
         ENTRY_DISTANCE_PCT: 0.0015,
-        MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
+        MAX_HOLD_HOURS: 48, TIMEOUT_R_RATIO: 0.5,
+        TRAIL_ACTIVATION: 0.8, TRAIL_STEP: 0.4,
     },
     B: {
         name: 'B组平衡',
@@ -629,7 +631,8 @@ const PRESETS = {
         ATR_SL_MULT: 1.6, ATR_TP_MULT: 1.3,
         ADX_MIN: 18, ADX_MID: 25, ADX_MID_SCORE: 75,
         ENTRY_DISTANCE_PCT: 0.0015,
-        MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
+        MAX_HOLD_HOURS: 48, TIMEOUT_R_RATIO: 0.5,
+        TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
     },
     C: {
         name: 'C组保守',
@@ -639,7 +642,8 @@ const PRESETS = {
         ATR_SL_MULT: 1.0, ATR_TP_MULT: 1.5,
         ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
         ENTRY_DISTANCE_PCT: 0,
-        MAX_HOLD_HOURS: 24, TIMEOUT_R_RATIO: 0.5,
+        MAX_HOLD_HOURS: 48, TIMEOUT_R_RATIO: 0.5,
+        TRAIL_ACTIVATION: 1.2, TRAIL_STEP: 0.6,
     },
 };
 
@@ -1820,8 +1824,8 @@ async function btFetchCandles(days) {
 
 function btJudgeOutcome(entryTs, direction, entry, sl, candles, cfg) {
   const isBuy   = direction === 'BUY';
-  const TRAIL_ACTIVATION = cfg.TRAIL_ACTIVATION ?? 0.5;
-  const TRAIL_STEP       = cfg.TRAIL_STEP       ?? 0.35;
+  const TRAIL_ACTIVATION = cfg.TRAIL_ACTIVATION ?? 1.0;
+  const TRAIL_STEP       = cfg.TRAIL_STEP       ?? 0.5;
   const effEntry  = isBuy ? entry*(1+BT_COST) : entry*(1-BT_COST);
   const slDist    = Math.min(Math.abs(entry-sl), entry*0.012);
   const initSL    = isBuy ? entry-slDist : entry+slDist;
