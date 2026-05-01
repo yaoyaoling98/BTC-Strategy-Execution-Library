@@ -979,6 +979,13 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles) {
         ? volumes.slice(-31, -1).reduce((s, v) => s + v, 0) / 30 : 0;
     const volSpike = volAvg30 > 0 && volumes[volumes.length - 1] > volAvg30 * 20;
 
+    // 成交量结构确认（最近20根均量）
+    const volAvg20 = volumes.length >= 21
+        ? volumes.slice(-21, -1).reduce((s, v) => s + v, 0) / 20 : 0;
+    const curVol   = volumes[volumes.length - 1];
+    const volRatio20 = volAvg20 > 0 ? curVol / volAvg20 : 1;
+    const volConfirm = volRatio20 > 1.3 ? 'strong' : volRatio20 < 0.7 ? 'weak' : 'normal';
+
     const rsiR  = scoreRSI(rsi);
     const bbR   = scoreBB(bb ? bb.pct : 0.5);
     const vwapR = vwap ? scoreVWAP((last - vwap) / vwap * 100) : { score: 0, vote: 0 };
@@ -986,8 +993,9 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles) {
 
     const vBottom    = detectVBottom(candles);
     const vBonus     = vBottom ? 10 : 0;
+    const volBonus   = volConfirm === 'strong' ? 8 : 0;
     const baseScore  = rsiR.score + bbR.score + vwapR.score + mfiR.score;
-    const totalScore = Math.min(100, baseScore + vBonus);
+    const totalScore = Math.min(100, baseScore + vBonus + volBonus);
 
     const votes     = rsiR.vote + bbR.vote + vwapR.vote + mfiR.vote;
     const direction = votes > 0 ? 'BUY' : votes < 0 ? 'SELL' : 'NEUTRAL';
@@ -1028,6 +1036,9 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles) {
         ? { pass: false, reason: `ADX ${adx.toFixed(0)} < ${cfg.ADX_MIN}，震荡市，信号暂停` }
         : risk;
 
+    if (finalRisk.pass && volConfirm === 'weak')
+        finalRisk = { pass: false, reason: '缩量信号，可靠性低' };
+
     if (finalRisk.pass && h1Candles && h1Candles.length >= 55) {
         const h1Closes = h1Candles.map(c => c.close);
         const h1Ema20  = calcEMA(h1Closes, 20);
@@ -1045,7 +1056,7 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles) {
         scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, mfi: mfiR.score, vBonus },
         votes:  { rsi: rsiR.vote,  bb: bbR.vote,  vwap: vwapR.vote,  mfi: mfiR.vote  },
         raw:    { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last },
-        stopLong, stopShort, tpLong, tpShort, rrRatio, marketState,
+        stopLong, stopShort, tpLong, tpShort, rrRatio, marketState, volConfirm,
     };
 }
 
@@ -1399,6 +1410,12 @@ function renderInsightCard(sig) {
         parts.push('<div class="ic-row">➜ 止损　<em>' + fmtP2(stopPrice)
             + '</em>　（距入场 <em>' + slPct + '%</em>）跟踪止损，盈利 0.5R 后开始移动</div>');
         parts.push('<div class="ic-row">➜ 止损状态　<em>等待激活</em></div>');
+
+        if (sig.volConfirm === 'strong') {
+            parts.push('<div class="ic-row" style="color:var(--green)">➜ 成交量放量确认 ✓</div>');
+        } else {
+            parts.push('<div class="ic-row">➜ 成交量正常</div>');
+        }
 
         const hist     = loadHistory();
         const resolved = hist.filter(r => r.outcome === 'WIN' || r.outcome === 'LOSS');
