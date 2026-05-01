@@ -1012,7 +1012,10 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles) {
         ? { pass: false, reason: 'Vol spike >20× avg — manipulation filter' }
         : riskCheck(direction, ema20, ema50);
 
-    const strength = totalScore >= 85 ? '强信号' : totalScore >= cfg.SIG_THRESHOLD ? '信号' : '未达阈值';
+    const strength = totalScore >= 85 ? '🔥 强信号'
+                   : totalScore >= cfg.SIG_THRESHOLD ? '✓ 标准信号'
+                   : totalScore >= 60 ? '⚠ 弱信号'
+                   : '未达阈值';
 
     // ADX 趋势强度过滤（ADX<20 = 震荡市，暂停信号）
     const adxData = calcADX(candles);
@@ -1395,6 +1398,9 @@ function renderInsightCard(sig) {
         if (!isBuy && vs.mfi  >= 0) notAligned.push('MFI（资金未流入）');
         if (notAligned.length > 0)
             parts.push('<div class="ic-row">➜ 未对齐：<em>' + notAligned.join('、') + '</em></div>');
+        if (score >= 60 && score < PRESETS.base.SIG_THRESHOLD) {
+            parts.push('<div class="ic-row ic-warn">⚠ 弱信号，建议减半仓位（若触发）</div>');
+        }
         parts.push('<div class="ic-row">➜ 没有可执行的交易，继续等待</div>');
     } else {
         // 信号触发
@@ -1587,7 +1593,11 @@ function renderSignalCard(sig) {
         const tendTxt = sig.direction === 'NEUTRAL' ? '中性' : sig.direction === 'BUY' ? '做多倾向' : '做空倾向';
         subEl.textContent    = tendTxt;
         barWrap.style.display = 'block';
-        legend.textContent    = score + ' / 100 — 需达到' + PRESETS.base.SIG_THRESHOLD + '分';
+        if (score >= 60 && score < PRESETS.base.SIG_THRESHOLD) {
+            legend.innerHTML = '<span style="color:var(--yellow)">⚠ 弱信号 ' + score + ' / 100 — 接近触发阈值</span>';
+        } else {
+            legend.textContent = score + ' / 100 — 需达到' + PRESETS.base.SIG_THRESHOLD + '分';
+        }
         entryTbl.style.display = 'none';
         return;
     }
@@ -1598,7 +1608,11 @@ function renderSignalCard(sig) {
     statusEl.className   = isBuy ? 'buy' : 'sell';
     statusEl.textContent = isBuy ? '▲ 做多' : '▼ 做空';
     flash(statusEl);
-    subEl.textContent    = sig.strength + ' · ' + score + ' / 100';
+    const strengthColor = score >= 85
+        ? (isBuy ? 'var(--green)' : 'var(--red)')
+        : 'inherit';
+    subEl.innerHTML = '<span style="color:' + strengthColor + ';font-weight:' + (score>=85?'700':'400') + '">'
+        + sig.strength + '</span> · ' + score + ' / 100';
     barWrap.style.display = 'none';
     legend.textContent    = '';
 
