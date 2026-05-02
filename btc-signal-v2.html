@@ -1900,6 +1900,33 @@ async function btFetchCandles(days) {
   return all;
 }
 
+async function btFetchCandlesN(days, bar, intervalSec) {
+  const endTime   = Date.now();
+  const startTime = endTime - days * 86400 * 1000;
+  const LIMIT     = 100;
+  const STEP      = LIMIT * intervalSec * 1000;
+  let all = [], winStart = startTime;
+  while (winStart < endTime) {
+    const winEnd = Math.min(winStart + STEP, endTime);
+    const url = `https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT&bar=${bar}&limit=${LIMIT}&after=${winEnd}&before=${winStart}`;
+    try {
+      const resp = await fetch(url);
+      const json = await resp.json();
+      if (json.data && json.data.length) {
+        for (const c of json.data) {
+          all.push({ time:parseInt(c[0]), open:parseFloat(c[1]), high:parseFloat(c[2]), low:parseFloat(c[3]), close:parseFloat(c[4]), volume:parseFloat(c[5]) });
+        }
+      }
+    } catch(e) { }
+    winStart = winEnd + 1;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  const seen = new Set();
+  all = all.filter(c => seen.has(c.time) ? false : seen.add(c.time));
+  all.sort((a, b) => a.time - b.time);
+  return all;
+}
+
 function btJudgeOutcome(entryTs, direction, entry, sl, candles, cfg) {
   const isBuy   = direction === 'BUY';
   const TRAIL_ACTIVATION = cfg.TRAIL_ACTIVATION ?? 1.0;
@@ -1948,19 +1975,37 @@ async function runBacktest() {
   log.innerHTML = '正在从 OKX 拉取 BTC-USDT 15m K线…';
 
   try {
+    log.innerHTML = '正在拉取 15m K线…';
     const candles = await btFetchCandles(days);
-    log.innerHTML += `<br>拉取完成：${candles.length} 根K线，开始回放…<br>`;
+    log.innerHTML += `　15m: ${candles.length}根`;
+
+    log.innerHTML += '　正在拉取 1h K线…';
+    const h1BtCandles = await btFetchCandlesN(days, '1H', 3600);
+    log.innerHTML += `　1h: ${h1BtCandles.length}根`;
+
+    log.innerHTML += '　正在拉取 4h K线…';
+    const h4BtCandles = await btFetchCandlesN(days, '4H', 14400);
+    log.innerHTML += `　4h: ${h4BtCandles.length}根<br>开始回放…<br>`;
 
     const WARMUP   = 60;
+    const WINDOW   = 200;
     const DEDUP_MS = 30 * 60 * 1000;
     let lastSigTs  = { BUY: 0, SELL: 0 };
     const results  = [];
 
     for (let i = WARMUP; i < candles.length - 1; i++) {
-      const slice   = candles.slice(0, i+1);
+      if (i % 500 === 0) {
+        log.innerHTML += `进度 ${((i / candles.length) * 100).toFixed(0)}%… `;
+        log.scrollTop = log.scrollHeight;
+        await new Promise(r => setTimeout(r, 0));
+      }
+      const slice   = candles.slice(Math.max(0, i - WINDOW + 1), i + 1);
       const closes  = slice.map(c => c.close);
       const volumes = slice.map(c => c.volume);
-      const sig     = generateSignal(closes, slice, volumes, cfg);
+      const ts15    = candles[i].time;
+      const h1Slice = h1BtCandles.filter(c => c.time <= ts15).slice(-100);
+      const h4Slice = h4BtCandles.filter(c => c.time <= ts15).slice(-100);
+      const sig     = generateSignal(closes, slice, volumes, cfg, h1Slice, h4Slice);
       if (!sig || sig.score < cfg.SIG_THRESHOLD || !sig.risk.pass) continue;
       const ts = candles[i].time;
       const dir = sig.direction;
