@@ -1074,6 +1074,12 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
             finalRisk = { pass: false, reason: '1h趋势反向，信号降级' };
     }
 
+    let h1Trend = null;
+    if (h1Candles && h1Candles.length >= 55) {
+        const _h1c = h1Candles.map(c => c.close);
+        h1Trend = calcEMA(_h1c, 20) > calcEMA(_h1c, 50) ? 'bull' : 'bear';
+    }
+
     let h4Ema20 = null, h4Ema50 = null;
     if (h4Candles && h4Candles.length >= 55) {
         const h4Closes = h4Candles.map(c => c.close);
@@ -1112,7 +1118,7 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
         scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, mfi: mfiR.score, vBonus },
         votes:  { rsi: rsiR.vote,  bb: bbR.vote,  vwap: vwapR.vote,  mfi: mfiR.vote  },
         raw:    { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last },
-        stopLong, stopShort, tpLong, tpShort, rrRatio, marketState, volConfirm, h4Trend, rsiSlope,
+        stopLong, stopShort, tpLong, tpShort, rrRatio, marketState, volConfirm, h4Trend, h1Trend, rsiSlope,
     };
 }
 
@@ -1393,6 +1399,27 @@ function renderStatusFooter() {
     }
 }
 
+/* ── Multi-timeframe alignment helper ─────────────────────── */
+function buildMtfRow(sig, isBuy) {
+    const h4 = sig.h4Trend;
+    const h1 = sig.h1Trend;
+    const m15Dir = sig.raw.ema20 > sig.raw.ema50 ? 'bull' : 'bear';
+    const expected = isBuy ? 'bull' : 'bear';
+
+    const fmt4 = h4 ? (h4 === 'bull' ? '多头' : '空头') : '—';
+    const fmt1 = h1 ? (h1 === 'bull' ? '多头' : '空头') : '—';
+    const fmt15 = '触发';
+
+    const h4Align = !h4 || h4 === expected;
+    const h1Align = !h1 || h1 === expected;
+    const allAlign = h4Align && h1Align;
+
+    return {
+        text: '4h [' + fmt4 + '] · 1h [' + fmt1 + '] · 15m [' + fmt15 + ']',
+        color: allAlign ? 'var(--green)' : 'var(--yellow)',
+    };
+}
+
 /* ================================================================
    RENDER INSIGHT CARD
    ================================================================ */
@@ -1443,6 +1470,10 @@ function renderInsightCard(sig) {
         if (!isBuy && vs.mfi  >= 0) notAligned.push('MFI（资金未流入）');
         if (notAligned.length > 0)
             parts.push('<div class="ic-row">➜ 未对齐：<em>' + notAligned.join('、') + '</em></div>');
+        {
+            const mtfRow = buildMtfRow(sig, isBuy);
+            parts.push('<div class="ic-row" style="color:' + mtfRow.color + '">➜ 周期对齐　' + mtfRow.text + '</div>');
+        }
         if (score >= 60 && score < PRESETS.base.SIG_THRESHOLD) {
             parts.push('<div class="ic-row ic-warn">⚠ 弱信号，建议减半仓位（若触发）</div>');
         }
@@ -1457,6 +1488,11 @@ function renderInsightCard(sig) {
 
         if (sig.marketState === 'TRENDING_UP' || sig.marketState === 'TRENDING_DOWN') {
             parts.push('<div class="ic-row ic-trend-warn">趋势市 — 均值回归胜率下降，建议观望</div>');
+        }
+
+        {
+            const mtfRow = buildMtfRow(sig, isBuy);
+            parts.push('<div class="ic-row" style="color:' + mtfRow.color + '">➜ 周期对齐　' + mtfRow.text + '</div>');
         }
 
         const entryP    = sig.raw.last;
