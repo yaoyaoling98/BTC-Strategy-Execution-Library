@@ -262,6 +262,7 @@ header {
     white-space: nowrap;
 }
 .pill.active { border-color: var(--accent); color: var(--accent); background: rgba(41,98,255,.08); }
+.pill.high   { border-color: var(--green);  color: var(--green);  background: rgba(38,166,154,.08); }
 .pill.v-bonus { border-color: var(--green); color: var(--green); background: rgba(38,166,154,.08); }
 
 /* Vote total */
@@ -357,6 +358,81 @@ footer {
 .sf-sep { color: var(--border-default); }
 #sfWinRate { font-family: var(--font-mono); }
 #sfUpdate  { margin-left: auto; }
+
+/* ── Backtest Panel ────────────────────────────────────────── */
+.bt-panel { margin: 12px 16px; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--r); overflow: hidden; }
+.bt-header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border-subtle); }
+.bt-label { font-size:11px; font-weight:600; color:var(--text-muted); letter-spacing:1px; text-transform:uppercase; }
+.bt-select { font-size:11px; padding:3px 8px; border-radius:var(--r); background:var(--bg-hover); border:1px solid var(--border-default); color:var(--text-secondary); cursor:pointer; }
+.bt-run-btn { font-size:11px; font-weight:600; padding:4px 12px; border-radius:var(--r); background:var(--accent); border:none; color:#fff; letter-spacing:.5px; cursor:pointer; }
+.bt-run-btn:disabled { opacity:.4; cursor:not-allowed; }
+.bt-body { padding:14px 16px; }
+.bt-stats { display:grid; grid-template-columns:repeat(5,1fr); gap:0; border:1px solid var(--border-default); border-radius:var(--r); overflow:hidden; }
+.bt-stat { padding:10px 12px; border-right:1px solid var(--border-subtle); }
+.bt-stat:last-child { border-right:none; }
+.bt-stat-label { font-size:10px; color:var(--text-muted); letter-spacing:1px; text-transform:uppercase; margin-bottom:3px; }
+.bt-stat-val { font-family:var(--font-mono); font-size:14px; font-weight:600; color:var(--text-primary); }
+.bt-stat-val.pos { color:var(--green); }
+.bt-stat-val.neg { color:var(--red); }
+.bt-log { margin-top:12px; max-height:180px; overflow-y:auto; font-family:var(--font-mono); font-size:11px; color:var(--text-muted); line-height:1.8; }
+.bt-log .win  { color:var(--green); }
+.bt-log .loss { color:var(--red); }
+.bt-log .draw { color:var(--text-muted); }
+.bt-ev-cmp { font-size:12px; color:var(--text-muted); margin-top:8px; padding-top:8px; border-top:1px solid var(--border-subtle); display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.bt-ev-cmp em { font-style:normal; font-family:var(--font-mono); }
+.bt-ev-cmp .pos { color:var(--green); }
+.bt-ev-cmp .neg { color:var(--red); }
+
+/* ── Position Calculator ───────────────────────────────────── */
+.pos-calc { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
+.pos-calc-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pos-calc-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.pos-calc-input {
+    font-size: 13px; font-family: var(--font-mono); padding: 4px 10px;
+    background: var(--bg-hover); border: 1px solid var(--border-default);
+    border-radius: var(--r); color: var(--text-primary); width: 120px;
+}
+.pos-calc-result { font-size: 13px; color: var(--text-secondary); margin-top: 6px; }
+.pos-calc-result em { color: var(--text-primary); font-style: normal; font-family: var(--font-mono); }
+.pos-calc-result .warn-loss { color: var(--red); font-weight: 600; }
+
+/* ── Insight Card ──────────────────────────────────────────── */
+.insight-card {
+    margin: 0 16px 12px;
+    padding: 16px 20px;
+    background: #0d1117;
+    border-radius: var(--r);
+    line-height: 1.6;
+    min-height: 100px;
+}
+.ic-title {
+    font-size: 20px; font-weight: 700;
+    font-family: var(--font-ui);
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+.ic-title.ic-buy  { color: var(--green); }
+.ic-title.ic-sell { color: var(--red);   }
+.ic-row {
+    font-size: 15px;
+    color: var(--text-secondary);
+    font-family: var(--font-ui);
+    margin-top: 2px;
+}
+.ic-row em     { color: var(--text-primary); font-style: normal; }
+.ic-row.ic-warn { color: var(--yellow); }
+.ic-note {
+    font-size: 13px; color: var(--text-muted);
+    margin-top: 8px;
+}
+.ic-row.ic-trend-warn { color: var(--yellow); font-weight: 600; margin-top: 4px; }
+.mkt-badge {
+    font-size: 11px; font-weight: 700; padding: 2px 8px;
+    border-radius: 10px; letter-spacing: .5px;
+}
+.mkt-badge.ranging  { background: var(--bg-hover); color: var(--text-muted); border: 1px solid var(--border-default); }
+.mkt-badge.trend-up { background: rgba(38,166,154,.18); color: var(--green); border: 1px solid var(--green); }
+.mkt-badge.trend-dn { background: rgba(239,83,80,.18);  color: var(--red);   border: 1px solid var(--red); }
 </style>
 </head>
 <body>
@@ -371,39 +447,45 @@ footer {
         <span id="tb-change" class="chg-badge">--</span>
     </div>
     <div class="hdr-r">
+        <span id="mktBadge" class="mkt-badge ranging" style="display:none">震荡市</span>
         <span class="hdr-countdown">
             <span id="nextTicker">--s</span> · <span id="nextSignal">--s</span>
         </span>
         <label class="news-toggle-wrap" title="消息面模式">
             <input type="checkbox" id="newsToggle" onchange="onNewsToggle()">
-            <span id="newsLabel">NEWS OFF</span>
+            <span id="newsLabel">消息面关</span>
         </label>
-        <button class="hdr-btn" onclick="runSignal()">↻ REFRESH</button>
+        <button class="hdr-btn" onclick="runSignal()">↻ 刷新</button>
+        <button class="hdr-btn" onclick="document.getElementById('btPanel').style.display='block'">回测</button>
     </div>
 </header>
 
 <!-- ── News banner ─────────────────────────────────────────── -->
-<div id="newsBanner">⚠ NEWS MODE ON — ALL SIGNALS SUPPRESSED</div>
+<div id="newsBanner">⚠ 消息面模式已开启 — 所有信号已暂停</div>
+
+<!-- ── Insight Card ────────────────────────────────────────── -->
+<div id="insightCard" class="insight-card"></div>
 
 <!-- ── 3-column layout ─────────────────────────────────────── -->
 <div class="layout">
 
     <!-- LEFT: Indicators ──────────────────────────────────── -->
     <aside class="panel col-indicators">
-        <div class="panel-header">Indicators</div>
+        <div class="panel-header">指标</div>
 
         <div class="ind-section">
-            <div class="ind-section-label">Score</div>
+            <div class="ind-section-label">评分</div>
             <div class="pills-wrap" id="scorePills"></div>
+            <div style="margin-top:6px;font-size:11px;color:var(--text-muted)" id="bbWidthRow"></div>
         </div>
 
         <div class="ind-section">
-            <div class="ind-section-label">Vote</div>
+            <div class="ind-section-label">方向投票</div>
             <div class="vote-row" id="voteRow"></div>
         </div>
 
         <div class="ind-section">
-            <button class="expand-btn" id="expandBtn" onclick="toggleDetail()">▸ Detail</button>
+            <button class="expand-btn" id="expandBtn" onclick="toggleDetail()">▸ 详情</button>
         </div>
 
         <div class="ind-section" id="indicatorDetail" style="display:none">
@@ -413,9 +495,9 @@ footer {
 
     <!-- CENTER: Signal ─────────────────────────────────────── -->
     <section class="panel col-signal">
-        <div class="panel-header">Signal</div>
+        <div class="panel-header">信号</div>
         <div class="sig-body">
-            <div id="sigStatus">WAITING</div>
+            <div id="sigStatus">观望中</div>
             <div id="sigSub" class="sig-sub"></div>
             <div id="scoreBarWrap" class="score-bar-wrap">
                 <div class="score-bar-fill" id="scoreBarFill" style="width:0%"></div>
@@ -423,18 +505,25 @@ footer {
             <div id="scoreLegend" class="score-legend"></div>
             <div id="blockedReason" class="blocked-reason" style="display:none"></div>
             <div id="entryTable" class="entry-tbl" style="display:none"></div>
+            <div class="pos-calc">
+                <div class="pos-calc-row">
+                    <span class="pos-calc-label">账户净值 USD</span>
+                    <input class="pos-calc-input" id="posEquity" type="number" placeholder="10000" oninput="calcPositionSize()">
+                </div>
+                <div class="pos-calc-result" id="posResult">输入账户净值后显示建议仓位…</div>
+            </div>
         </div>
         <div class="stats-row">
             <div class="stat-item">
-                <div class="stat-label">24H High</div>
+                <div class="stat-label">最高</div>
                 <div class="stat-val up" id="high24">--</div>
             </div>
             <div class="stat-item">
-                <div class="stat-label">24H Low</div>
+                <div class="stat-label">最低</div>
                 <div class="stat-val dn" id="low24">--</div>
             </div>
             <div class="stat-item">
-                <div class="stat-label">Volume</div>
+                <div class="stat-label">成交量</div>
                 <div class="stat-val" id="vol24">--</div>
             </div>
             <div class="stat-item">
@@ -447,17 +536,17 @@ footer {
     <!-- RIGHT: History ─────────────────────────────────────── -->
     <aside class="panel col-history">
         <div class="panel-header">
-            History
-            <button class="btn-clear" onclick="clearHistory()">Clear</button>
+            历史信号
+            <button class="btn-clear" onclick="clearHistory()">清空</button>
         </div>
         <div class="hist-row hist-hdr">
             <span></span>
-            <span>Dir</span>
-            <span>Score</span>
-            <span>Price</span>
-            <span style="text-align:right">Time</span>
+            <span>方向</span>
+            <span>评分</span>
+            <span>价格</span>
+            <span style="text-align:right">时间</span>
         </div>
-        <div id="histList"><div class="empty-hist">No signals yet</div></div>
+        <div id="histList"><div class="empty-hist">暂无信号记录</div></div>
     </aside>
 
 </div>
@@ -465,11 +554,45 @@ footer {
 <!-- ── Footer status bar ───────────────────────────────────── -->
 <footer>
     <span class="sf-dot" id="sfDot"></span>
-    <span id="sfConn">Connecting…</span>
+    <span id="sfConn">连接中…</span>
     <span class="sf-sep">|</span>
     <span id="sfWinRate">—</span>
     <span id="sfUpdate" style="margin-left:auto">—</span>
 </footer>
+
+<!-- ── Backtest Panel ───────────────────────────────────────── -->
+<div class="bt-panel" id="btPanel" style="display:none">
+  <div class="bt-header">
+    <span class="bt-label">内置回测</span>
+    <select class="bt-select" id="btDays">
+      <option value="90">90天</option>
+      <option value="180">180天</option>
+      <option value="365" selected>365天</option>
+    </select>
+    <select class="bt-select" id="btPreset">
+      <option value="base">基准</option>
+      <option value="A">A组高胜率</option>
+      <option value="B">B组平衡</option>
+      <option value="C">C组保守</option>
+    </select>
+    <button class="bt-run-btn" id="btRunBtn" onclick="runBacktest()">▶ 运行回测</button>
+    <button class="hdr-btn" onclick="document.getElementById('btPanel').style.display='none'" style="margin-left:auto">✕</button>
+  </div>
+  <div class="bt-body">
+    <div class="bt-stats" id="btStats" style="display:none">
+      <div class="bt-stat"><div class="bt-stat-label">信号数</div><div class="bt-stat-val" id="btN">—</div></div>
+      <div class="bt-stat"><div class="bt-stat-label">胜率</div><div class="bt-stat-val" id="btWR">—</div></div>
+      <div class="bt-stat"><div class="bt-stat-label">期望值</div><div class="bt-stat-val" id="btEV">—</div></div>
+      <div class="bt-stat"><div class="bt-stat-label">平均盈R</div><div class="bt-stat-val pos" id="btAW">—</div></div>
+      <div class="bt-stat"><div class="bt-stat-label">平均亏R</div><div class="bt-stat-val neg" id="btAL">—</div></div>
+    </div>
+    <div class="bt-ev-cmp" id="btEvCmp" style="display:none">
+      <span id="btEvCmpText">—</span>
+      <button class="bt-select" onclick="btResetBaseline()" style="margin-left:auto;font-size:11px">重置基准</button>
+    </div>
+    <div class="bt-log" id="btLog">点击「运行回测」从 OKX 拉取历史数据并回放策略…</div>
+  </div>
+</div>
 
 <script>
 'use strict';
@@ -477,19 +600,51 @@ footer {
 /* ================================================================
    CONFIG
    ================================================================ */
-const CONFIG = {
-    pair:            'XBTUSD',
-    KRAKEN_REST:     'https://api.kraken.com/0/public',
-    RSI_PERIOD:      14,
-    BB_PERIOD:       20,
-    BB_STD:           2,
-    EMA_SHORT:       20,
-    EMA_LONG:        50,
-    VOL_PERIOD:      20,
-    INTERVAL_15M:    15,
-    SIG_THRESHOLD:   70,
-    STOP_LOSS_PCT:   0.015,
-    TAKE_PROFIT_PCT: 0.020,
+const PRESETS = {
+    base: {
+        name: '基准',
+        EMA_SHORT: 20, EMA_LONG: 50,
+        STOP_LOSS_PCT: 0.015, TAKE_PROFIT_PCT: 0.020,
+        SIG_THRESHOLD: 65,
+        ATR_SL_MULT: 1.0, ATR_TP_MULT: 1.5,
+        ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
+        ENTRY_DISTANCE_PCT: 0,
+        MAX_HOLD_HOURS: 48, TIMEOUT_R_RATIO: 0.5,
+        TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
+    },
+    A: {
+        name: 'A组高胜率',
+        EMA_SHORT: 20, EMA_LONG: 50,
+        STOP_LOSS_PCT: 0.015, TAKE_PROFIT_PCT: 0.020,
+        SIG_THRESHOLD: 78,
+        ATR_SL_MULT: 1.7, ATR_TP_MULT: 1.1,
+        ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
+        ENTRY_DISTANCE_PCT: 0.0015,
+        MAX_HOLD_HOURS: 48, TIMEOUT_R_RATIO: 0.5,
+        TRAIL_ACTIVATION: 0.8, TRAIL_STEP: 0.4,
+    },
+    B: {
+        name: 'B组平衡',
+        EMA_SHORT: 20, EMA_LONG: 50,
+        STOP_LOSS_PCT: 0.015, TAKE_PROFIT_PCT: 0.020,
+        SIG_THRESHOLD: 75,
+        ATR_SL_MULT: 1.6, ATR_TP_MULT: 1.3,
+        ADX_MIN: 18, ADX_MID: 25, ADX_MID_SCORE: 75,
+        ENTRY_DISTANCE_PCT: 0.0015,
+        MAX_HOLD_HOURS: 48, TIMEOUT_R_RATIO: 0.5,
+        TRAIL_ACTIVATION: 1.0, TRAIL_STEP: 0.5,
+    },
+    C: {
+        name: 'C组保守',
+        EMA_SHORT: 20, EMA_LONG: 50,
+        STOP_LOSS_PCT: 0.015, TAKE_PROFIT_PCT: 0.020,
+        SIG_THRESHOLD: 75,
+        ATR_SL_MULT: 1.0, ATR_TP_MULT: 1.5,
+        ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
+        ENTRY_DISTANCE_PCT: 0,
+        MAX_HOLD_HOURS: 48, TIMEOUT_R_RATIO: 0.5,
+        TRAIL_ACTIVATION: 1.2, TRAIL_STEP: 0.6,
+    },
 };
 
 const TICKER_INTERVAL = 5;
@@ -500,6 +655,7 @@ let newsMode        = false;
 let tickerCountdown = TICKER_INTERVAL;
 let signalCountdown = SIGNAL_INTERVAL;
 let detailOpen      = false;
+let signalRunning   = false;
 
 /* ================================================================
    FORMATTERS
@@ -514,11 +670,11 @@ function fmtVol(v) {
 }
 function relativeTime(ts) {
     const m = Math.floor((Date.now() - ts) / 60000);
-    if (m < 1)  return 'just now';
-    if (m < 60) return m + 'm ago';
+    if (m < 1)  return '刚刚';
+    if (m < 60) return m + '分钟前';
     const h = Math.floor(m / 60);
-    if (h < 24) return h + 'h ago';
-    return Math.floor(h / 24) + 'd ago';
+    if (h < 24) return h + '小时前';
+    return Math.floor(h / 24) + '天前';
 }
 function flash(el) {
     if (!el) return;
@@ -533,7 +689,7 @@ function flash(el) {
 function onNewsToggle() {
     newsMode = document.getElementById('newsToggle').checked;
     const lbl = document.getElementById('newsLabel');
-    lbl.textContent = newsMode ? 'NEWS ON' : 'NEWS OFF';
+    lbl.textContent = newsMode ? '消息面开' : '消息面关';
     lbl.classList.toggle('active', newsMode);
     document.getElementById('newsBanner').style.display = newsMode ? 'block' : 'none';
     if (!newsMode) runSignal();
@@ -546,7 +702,7 @@ function onNewsToggle() {
 function toggleDetail() {
     detailOpen = !detailOpen;
     document.getElementById('indicatorDetail').style.display = detailOpen ? 'block' : 'none';
-    document.getElementById('expandBtn').textContent = (detailOpen ? '▾' : '▸') + ' Detail';
+    document.getElementById('expandBtn').textContent = (detailOpen ? '▾' : '▸') + ' 详情';
 }
 
 /* ================================================================
@@ -558,7 +714,7 @@ async function fetchTicker() {
     dot.className = 'sf-dot loading';
 
     try {
-        const res  = await fetch(CONFIG.KRAKEN_REST + '/Ticker?pair=' + CONFIG.pair);
+        const res  = await fetch('https://api.kraken.com/0/public' + '/Ticker?pair=' + 'XBTUSD');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const json = await res.json();
         if (json.error && json.error.length) throw new Error(json.error[0]);
@@ -591,12 +747,10 @@ async function fetchTicker() {
         document.getElementById('vol24').textContent  = fmtVol(vol) + ' BTC';
         document.getElementById('vwap24').textContent = fmtUSD(vwap);
 
-        updateOpenSignals(price);
-
         dot.className    = 'sf-dot ok';
         conn.textContent = 'Kraken · bid ' + bid.toFixed(0) + ' / ask ' + ask.toFixed(0);
         document.getElementById('sfUpdate').textContent =
-            'Updated ' + new Date().toLocaleTimeString('en-US', { hour12: false });
+            '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
 
     } catch (err) {
         dot.className    = 'sf-dot err';
@@ -608,11 +762,11 @@ async function fetchTicker() {
    KRAKEN OHLC (30s) — signal engine data
    ================================================================ */
 async function fetchOHLC(interval) {
-    const url  = CONFIG.KRAKEN_REST + '/OHLC?pair=' + CONFIG.pair + '&interval=' + interval;
+    const url  = 'https://api.kraken.com/0/public' + '/OHLC?pair=' + 'XBTUSD' + '&interval=' + interval;
     const resp = await fetch(url);
     const data = await resp.json();
     if (data.error && data.error.length) throw new Error(data.error[0]);
-    const raw = data.result[CONFIG.pair] || data.result['XXBTZUSD'];
+    const raw = data.result['XBTUSD'] || data.result['XXBTZUSD'];
     return raw.map(c => ({
         time:   c[0] * 1000,
         open:   parseFloat(c[1]),
@@ -627,7 +781,7 @@ async function fetchOHLC(interval) {
    RSI — Wilder smoothing  (Jesse: jesse/indicators/rsi.py)
    ================================================================ */
 function calcRSI(closes, period) {
-    period = period || CONFIG.RSI_PERIOD;
+    period = period || 14;
     if (closes.length < period + 1) return null;
     let avgGain = 0, avgLoss = 0;
     for (let i = 1; i <= period; i++) {
@@ -646,7 +800,7 @@ function calcRSI(closes, period) {
 
 /* Jesse: jesse/indicators/bollinger_bands.py */
 function calcBB(closes, period, mult) {
-    period = period || CONFIG.BB_PERIOD; mult = mult || CONFIG.BB_STD;
+    period = period || 20; mult = mult || 2;
     if (closes.length < period) return null;
     const slice  = closes.slice(-period);
     const middle = slice.reduce((s, v) => s + v, 0) / period;
@@ -672,7 +826,7 @@ function calcEMA(closes, period) {
 function calcVWAP(candles) {
     if (!candles || !candles.length) return null;
     const now   = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     let cumVP = 0, cumV = 0;
     for (const c of candles) {
         if (c.time < today) continue;
@@ -683,7 +837,7 @@ function calcVWAP(candles) {
 }
 
 function calcVolRatio(volumes, period) {
-    period = period || CONFIG.VOL_PERIOD;
+    period = period || 20;
     if (volumes.length < period + 1) return 1;
     const avg = volumes.slice(-period - 1, -1).reduce((s, v) => s + v, 0) / period;
     return avg > 0 ? volumes[volumes.length - 1] / avg : 1;
@@ -707,6 +861,53 @@ function calcMFI(candles, period) {
 }
 
 /* ReinforcedQuickie: V-bottom — 5 declining bars then upturn */
+/* ATR — Wilder's smoothing（与 TradingView 一致）*/
+/* ADX — Wilder 平滑（趋势强度过滤）*/
+function calcADX(candles, period) {
+    period = period || 14;
+    if (candles.length < period * 2) return null;
+    const trs = [], plusDMs = [], minusDMs = [];
+    for (let i = 1; i < candles.length; i++) {
+        const h = candles[i].high, l = candles[i].low;
+        const ph = candles[i-1].high, pl = candles[i-1].low, pc = candles[i-1].close;
+        trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+        const upMove = h - ph, downMove = pl - l;
+        plusDMs.push(upMove > downMove && upMove > 0 ? upMove : 0);
+        minusDMs.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    }
+    const smooth = arr => {
+        let s = arr.slice(0, period).reduce((a, b) => a + b, 0);
+        const r = [s];
+        for (let i = period; i < arr.length; i++) { s = s - s / period + arr[i]; r.push(s); }
+        return r;
+    };
+    const sTR = smooth(trs), sPDM = smooth(plusDMs), sMDM = smooth(minusDMs);
+    const DIs = sTR.map((tr, i) => ({
+        plus:  tr ? 100 * sPDM[i] / tr : 0,
+        minus: tr ? 100 * sMDM[i] / tr : 0,
+    }));
+    const DXs = DIs.map(d => {
+        const s = d.plus + d.minus;
+        return s ? 100 * Math.abs(d.plus - d.minus) / s : 0;
+    });
+    let adx = DXs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < DXs.length; i++) adx = (adx * (period - 1) + DXs[i]) / period;
+    return { adx, plusDI: DIs[DIs.length - 1].plus, minusDI: DIs[DIs.length - 1].minus };
+}
+
+function calcATR(candles, period) {
+    period = period || 14;
+    if (candles.length < period + 1) return null;
+    const trs = [];
+    for (let i = 1; i < candles.length; i++) {
+        const h = candles[i].high, l = candles[i].low, pc = candles[i - 1].close;
+        trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    }
+    let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < trs.length; i++) atr = (atr * (period - 1) + trs[i]) / period;
+    return atr;
+}
+
 function detectVBottom(candles) {
     if (candles.length < 6) return false;
     const avg = candles.slice(-6).map(c => (c.open + c.high + c.low + c.close) / 4);
@@ -770,25 +971,37 @@ function scoreMFI(mfi) {
 /* ── Risk manager  (Freqtrade EMA trend filter) ──────────── */
 function riskCheck(direction, ema20, ema50) {
     if (newsMode)                               return { pass: false, reason: 'News mode active' };
-    if (direction === 'BUY'  && ema20 < ema50)  return { pass: false, reason: 'EMA20 < EMA50 — bearish trend, long blocked' };
-    if (direction === 'SELL' && ema20 > ema50)  return { pass: false, reason: 'EMA20 > EMA50 — bullish trend, short blocked' };
+    if (direction === 'BUY'  && ema20 < ema50)  return { pass: false, reason: 'EMA20 < EMA50 — 空头趋势，禁止做多' };
+    if (direction === 'SELL' && ema20 > ema50)  return { pass: false, reason: 'EMA20 > EMA50 — 多头趋势，禁止做空' };
     return { pass: true, reason: 'OK' };
 }
 
 /* ── Signal engine ───────────────────────────────────────── */
-function generateSignal(closes, candles, volumes) {
+function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
+    cfg = cfg || PRESETS.base;
     const last     = closes[closes.length - 1];
     const rsi      = calcRSI(closes);
     const bb       = calcBB(closes);
     const vwap     = calcVWAP(candles);
-    const ema20    = calcEMA(closes, CONFIG.EMA_SHORT);
-    const ema50    = calcEMA(closes, CONFIG.EMA_LONG);
+    const ema20    = calcEMA(closes, cfg.EMA_SHORT);
+    const ema50    = calcEMA(closes, cfg.EMA_LONG);
     const volRatio = calcVolRatio(volumes);
     const mfi      = calcMFI(candles);
 
     const volAvg30 = volumes.length >= 31
         ? volumes.slice(-31, -1).reduce((s, v) => s + v, 0) / 30 : 0;
     const volSpike = volAvg30 > 0 && volumes[volumes.length - 1] > volAvg30 * 20;
+
+    // 成交量结构确认（最近20根均量）
+    const volAvg20 = volumes.length >= 21
+        ? volumes.slice(-21, -1).reduce((s, v) => s + v, 0) / 20 : 0;
+    const curVol   = volumes[volumes.length - 1];
+    const volRatio20 = volAvg20 > 0 ? curVol / volAvg20 : 1;
+    const volConfirm = volRatio20 > 1.3 ? 'strong' : volRatio20 < 0.7 ? 'weak' : 'normal';
+
+    const rsiPrev1 = closes.length > 16 ? calcRSI(closes.slice(0, -1)) : rsi;
+    const rsiPrev2 = closes.length > 17 ? calcRSI(closes.slice(0, -2)) : rsiPrev1;
+    const rsiSlope = rsi > rsiPrev1 ? 'up' : 'down';
 
     const rsiR  = scoreRSI(rsi);
     const bbR   = scoreBB(bb ? bb.pct : 0.5);
@@ -797,37 +1010,294 @@ function generateSignal(closes, candles, volumes) {
 
     const vBottom    = detectVBottom(candles);
     const vBonus     = vBottom ? 10 : 0;
+    const volBonus   = volConfirm === 'strong' ? 8 : 0;
     const baseScore  = rsiR.score + bbR.score + vwapR.score + mfiR.score;
-    const totalScore = Math.min(100, baseScore + vBonus);
+    let   totalScore = Math.min(100, baseScore + vBonus + volBonus);
 
     const votes     = rsiR.vote + bbR.vote + vwapR.vote + mfiR.vote;
     const direction = votes > 0 ? 'BUY' : votes < 0 ? 'SELL' : 'NEUTRAL';
+
+    // RSI 斜率过滤：动量方向不一致扣15分
+    if (direction === 'BUY'  && !(rsi > rsiPrev1 && rsiPrev1 > rsiPrev2)) totalScore = Math.max(0, totalScore - 15);
+    if (direction === 'SELL' && !(rsi < rsiPrev1 && rsiPrev1 < rsiPrev2)) totalScore = Math.max(0, totalScore - 15);
+    totalScore = Math.min(100, totalScore);
 
     const risk = volSpike
         ? { pass: false, reason: 'Vol spike >20× avg — manipulation filter' }
         : riskCheck(direction, ema20, ema50);
 
-    const strength  = totalScore >= 85 ? 'STRONG SIGNAL' : totalScore >= CONFIG.SIG_THRESHOLD ? 'SIGNAL' : 'BELOW THRESHOLD';
-    const stopLong  = (last * (1 - CONFIG.STOP_LOSS_PCT)).toFixed(2);
-    const stopShort = (last * (1 + CONFIG.STOP_LOSS_PCT)).toFixed(2);
+    const strength = totalScore >= 85 ? '🔥 强信号'
+                   : totalScore >= cfg.SIG_THRESHOLD ? '✓ 标准信号'
+                   : totalScore >= 60 ? '⚠ 弱信号'
+                   : '未达阈值';
+
+    // ADX 趋势强度过滤（ADX<20 = 震荡市，暂停信号）
+    const adxData = calcADX(candles);
+    const adx = adxData ? adxData.adx : 25;
+
+    // ATR 动态止损（Freqtrade 社区标准，BTC 15m）
+    const atr = calcATR(candles);
+    let stopLong, stopShort, tpLong, tpShort, rrRatio;
+    if (atr) {
+        const slDist = Math.min(
+            Math.max(atr * cfg.ATR_SL_MULT, last * 0.008),
+            last * 0.03
+        );
+        const tpDist = slDist * (cfg.ATR_TP_MULT / cfg.ATR_SL_MULT);
+        stopLong  = (last - slDist).toFixed(2);
+        stopShort = (last + slDist).toFixed(2);
+        tpLong    = (last + tpDist).toFixed(2);
+        tpShort   = (last - tpDist).toFixed(2);
+        rrRatio   = (tpDist / slDist).toFixed(1);
+    } else {
+        stopLong  = (last * (1 - cfg.STOP_LOSS_PCT)).toFixed(2);
+        stopShort = (last * (1 + cfg.STOP_LOSS_PCT)).toFixed(2);
+        tpLong    = (last * (1 + cfg.TAKE_PROFIT_PCT)).toFixed(2);
+        tpShort   = (last * (1 - cfg.TAKE_PROFIT_PCT)).toFixed(2);
+        rrRatio   = (cfg.TAKE_PROFIT_PCT / cfg.STOP_LOSS_PCT).toFixed(1);
+    }
+
+    let finalRisk = (adx < cfg.ADX_MIN && risk.pass)
+        ? { pass: false, reason: `ADX ${adx.toFixed(0)} < ${cfg.ADX_MIN}，震荡市，信号暂停` }
+        : risk;
+
+    if (finalRisk.pass && volConfirm === 'weak')
+        finalRisk = { pass: false, reason: '缩量信号，可靠性低' };
+
+    let h1Trend = null;
+    if (h1Candles && h1Candles.length >= 55) {
+        const h1Closes = h1Candles.map(c => c.close);
+        const h1Ema20  = calcEMA(h1Closes, 20);
+        const h1Ema50  = calcEMA(h1Closes, 50);
+        h1Trend = h1Ema20 > h1Ema50 ? 'bull' : 'bear';
+        if (finalRisk.pass) {
+            if (direction === 'BUY'  && h1Ema20 <= h1Ema50)
+                finalRisk = { pass: false, reason: '1h趋势反向，信号降级' };
+            if (direction === 'SELL' && h1Ema20 >= h1Ema50)
+                finalRisk = { pass: false, reason: '1h趋势反向，信号降级' };
+        }
+    }
+
+    let h4Ema20 = null, h4Ema50 = null;
+    if (h4Candles && h4Candles.length >= 55) {
+        const h4Closes = h4Candles.map(c => c.close);
+        h4Ema20 = calcEMA(h4Closes, 20);
+        h4Ema50 = calcEMA(h4Closes, 50);
+        if (finalRisk.pass) {
+            if (direction === 'BUY'  && h4Ema20 <= h4Ema50)
+                finalRisk = { pass: false, reason: '4h趋势向下，禁止做多' };
+            if (direction === 'SELL' && h4Ema20 >= h4Ema50)
+                finalRisk = { pass: false, reason: '4h趋势向上，禁止做空' };
+        }
+    }
+    const h4Trend = h4Ema20 !== null ? (h4Ema20 > h4Ema50 ? 'bull' : 'bear') : null;
+
+    // 反转确认过滤：要求最后一根K线出现反转方向
+    if (finalRisk.pass && candles.length >= 3) {
+        const cur  = candles[candles.length - 1];
+        const prev = candles[candles.length - 2];
+        if (direction === 'BUY') {
+            const isBullCandle  = cur.close > cur.open;
+            const isPriceRising = cur.close > prev.close;
+            if (!isBullCandle || !isPriceRising)
+                finalRisk = { pass: false, reason: '尚未出现反转K线，等待确认' };
+        } else if (direction === 'SELL') {
+            const isBearCandle   = cur.close < cur.open;
+            const isPriceFalling = cur.close < prev.close;
+            if (!isBearCandle || !isPriceFalling)
+                finalRisk = { pass: false, reason: '尚未出现反转K线，等待确认' };
+        }
+    }
+
+    const marketState = detectMarketState(bb, ema20, ema50, last);
 
     return {
-        score: totalScore, direction, strength, risk,
+        score: totalScore, direction, strength, risk: finalRisk,
         scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, mfi: mfiR.score, vBonus },
         votes:  { rsi: rsiR.vote,  bb: bbR.vote,  vwap: vwapR.vote,  mfi: mfiR.vote  },
         raw:    { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last },
-        stopLong, stopShort,
+        stopLong, stopShort, tpLong, tpShort, rrRatio, marketState, volConfirm, h4Trend, h1Trend, rsiSlope,
     };
 }
 
+function detectMarketState(bb, ema20, ema50, price) {
+    if (!bb || !price) return 'RANGING';
+    const bbWidth = (bb.upper - bb.lower) / bb.middle;
+    const spread  = Math.abs(ema20 - ema50) / price;
+    if (bbWidth > 0.04 && spread > 0.008) {
+        return ema20 > ema50 ? 'TRENDING_UP' : 'TRENDING_DOWN';
+    }
+    return 'RANGING';
+}
+
 /* ================================================================
-   HISTORY  (localStorage, max 50)
+   HISTORY  (localStorage, max 200)
    ================================================================ */
-function loadHistory()     { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } }
-function saveHistory(list) { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(-50))); }
+function loadHistory() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+        const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+        return raw.filter(h => h.ts >= cutoff);
+    } catch { return []; }
+}
+function saveHistory(list) { localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(-200))); }
+
+/* ================================================================
+   AUTO BACKFILL  — 首次打开冷启动 + 每次补缺历史数据
+   ================================================================ */
+async function autoBackfill() {
+    const OKX_BASE = 'https://www.okx.com/api/v5/market/candles';
+    const INST     = 'BTC-USDT';
+    const BAR      = '15m';
+    const LIMIT    = 100;
+    const STEP     = LIMIT * 15 * 60 * 1000;
+
+    const history  = loadHistory();
+    const now      = Date.now();
+    const COLD_DAYS = 90;
+    const GAP_MS    = 60 * 60 * 1000; // 1小时
+
+    let fetchStart, fetchEnd;
+    if (history.length < 10) {
+        // 冷启动：拉90天
+        fetchStart = now - COLD_DAYS * 24 * 3600 * 1000;
+        fetchEnd   = now;
+    } else {
+        const lastTs = Math.max(...history.map(h => h.ts));
+        if (now - lastTs < GAP_MS) return; // 数据新鲜，跳过
+        fetchStart = lastTs;
+        fetchEnd   = now;
+    }
+
+    const sb = document.getElementById('status-bar');
+    if (sb) sb.textContent = '正在补缺历史数据…';
+
+    // 分窗口拉取K线
+    const allCandles = [];
+    let winStart = fetchStart;
+    let failCount = parseInt(localStorage.getItem('backfill_fail_count') || '0');
+
+    try {
+        while (winStart < fetchEnd) {
+            const winEnd = Math.min(winStart + STEP, fetchEnd);
+            let ok = false;
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    const url = `${OKX_BASE}?instId=${INST}&bar=${BAR}&limit=${LIMIT}&after=${winEnd}&before=${winStart}`;
+                    const res  = await fetch(url);
+                    const json = await res.json();
+                    if (json.code !== '0' || !json.data) break;
+                    for (const d of json.data) {
+                        allCandles.push({
+                            time:   parseInt(d[0]),
+                            open:   parseFloat(d[1]),
+                            high:   parseFloat(d[2]),
+                            low:    parseFloat(d[3]),
+                            close:  parseFloat(d[4]),
+                            volume: parseFloat(d[5]),
+                        });
+                    }
+                    ok = true;
+                    break;
+                } catch (e) {
+                    if (attempt === 1) {
+                        const msg = `autoBackfill 窗口失败 [${new Date(winStart).toISOString()}~${new Date(winEnd).toISOString()}]: ${e.message}`;
+                        console.error(msg);
+                        failCount++;
+                        localStorage.setItem('backfill_fail_count', failCount);
+                        if (sb) sb.textContent = `补缺失败(${failCount}次): ${e.message}`;
+                    }
+                    await new Promise(r => setTimeout(r, 500));
+                }
+            }
+            if (!ok && allCandles.length === 0) break;
+            winStart = winEnd + 1;
+            await new Promise(r => setTimeout(r, 300));
+        }
+    } catch (err) {
+        failCount++;
+        localStorage.setItem('backfill_fail_count', failCount);
+        console.error('autoBackfill 致命错误:', err);
+        if (sb) sb.textContent = `补缺异常(${failCount}次): ${err.message}`;
+        return;
+    }
+
+    if (allCandles.length < 50) {
+        if (sb) sb.textContent = '';
+        return;
+    }
+
+    // 去重 + 排序
+    const seen = new Set();
+    const uniq = allCandles.filter(c => { if (seen.has(c.time)) return false; seen.add(c.time); return true; });
+    uniq.sort((a, b) => a.time - b.time);
+
+    // 逐根K线跑信号
+    const MIN_LEN = Math.max(20, 14, 50) + 10; // BB_PERIOD=20, RSI_PERIOD=14, EMA_LONG=50
+    const existingTs = new Set(loadHistory().map(h => h.ts));
+    const newRecords  = [];
+    const DEDUP_MS    = 30 * 60 * 1000;
+
+    for (let i = MIN_LEN; i < uniq.length; i++) {
+        const slice   = uniq.slice(0, i + 1);
+        const closes  = slice.map(c => c.close);
+        const volumes = slice.map(c => c.volume);
+        const sig     = generateSignal(closes, slice, volumes);
+        if (!sig || sig.score < PRESETS.base.SIG_THRESHOLD || !sig.risk.pass) continue;
+
+        const ts = uniq[i].time;
+        if (existingTs.has(ts)) continue;
+
+        // 去重：同方向30分钟内只保留第一条
+        const recent = newRecords.filter(r => r.direction === sig.direction && Math.abs(r.ts - ts) < DEDUP_MS);
+        if (recent.length > 0) continue;
+
+        // 判断WIN/LOSS：扫描未来K线
+        let outcome = null;
+        const sl = parseFloat(sig.direction === 'BUY' ? sig.stopLong  : sig.stopShort);
+        const tp = parseFloat(sig.direction === 'BUY' ? sig.tpLong    : sig.tpShort);
+        for (let j = i + 1; j < uniq.length; j++) {
+            const fc = uniq[j];
+            if (sig.direction === 'BUY') {
+                if (fc.low  <= sl) { outcome = 'LOSS'; break; }
+                if (fc.high >= tp) { outcome = 'WIN';  break; }
+            } else {
+                if (fc.high >= sl) { outcome = 'LOSS'; break; }
+                if (fc.low  <= tp) { outcome = 'WIN';  break; }
+            }
+        }
+
+        const price = uniq[i].close;
+        newRecords.push({
+            ts,
+            time:      new Date(ts).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
+            direction: sig.direction,
+            strength:  sig.strength,
+            score:     sig.score,
+            price:     price.toFixed(2),
+            stop:      sig.direction === 'BUY' ? sig.stopLong : sig.stopShort,
+            bbTarget:  sig.direction === 'BUY' ? parseFloat(sig.tpLong) : parseFloat(sig.tpShort),
+            rsi:       sig.raw.rsi ? sig.raw.rsi.toFixed(1) : '--',
+            bbPct:     sig.raw.bb  ? (sig.raw.bb.pct * 100).toFixed(1) + '%' : '--',
+            emaTrend:  sig.raw.ema20 > sig.raw.ema50 ? 'bull' : 'bear',
+            outcome,
+        });
+        existingTs.add(ts);
+    }
+
+    if (newRecords.length > 0) {
+        const merged = [...loadHistory(), ...newRecords];
+        merged.sort((a, b) => a.ts - b.ts);
+        saveHistory(merged);
+        renderHistory();
+        renderStatusFooter();
+    }
+
+    if (sb) sb.textContent = '';
+}
 
 function logSignal(sig) {
-    if (sig.score < CONFIG.SIG_THRESHOLD || !sig.risk.pass) return;
+    if (sig.score < PRESETS.base.SIG_THRESHOLD || !sig.risk.pass) return;
     const history = loadHistory();
     const last    = history[history.length - 1];
     const now     = Date.now();
@@ -841,7 +1311,7 @@ function logSignal(sig) {
         score:     sig.score,
         price:     price.toFixed(2),
         stop:      sig.direction === 'BUY' ? sig.stopLong : sig.stopShort,
-        bbTarget:  bb ? parseFloat(bb.middle.toFixed(2)) : null,
+        bbTarget:  sig.direction === 'BUY' ? parseFloat(sig.tpLong) : parseFloat(sig.tpShort),
         rsi:       rsi ? rsi.toFixed(1) : '--',
         bbPct:     bb  ? (bb.pct * 100).toFixed(1) + '%' : '--',
         emaTrend:  ema20 > ema50 ? 'bull' : 'bear',
@@ -850,27 +1320,34 @@ function logSignal(sig) {
     saveHistory(history);
 }
 
-function updateOpenSignals(currentPrice) {
+function updateOpenSignals(candles) {
     const history = loadHistory();
     let changed = false;
+    const intervalMs = 15 * 60 * 1000;
     for (const h of history) {
         if (h.outcome) continue;
         const sl = parseFloat(h.stop);
         const tp = h.bbTarget != null ? parseFloat(h.bbTarget) : null;
         if (tp == null) continue;
-        if (h.direction === 'BUY') {
-            if (currentPrice <= sl)      { h.outcome = 'LOSS'; changed = true; }
-            else if (currentPrice >= tp) { h.outcome = 'WIN';  changed = true; }
-        } else {
-            if (currentPrice >= sl)      { h.outcome = 'LOSS'; changed = true; }
-            else if (currentPrice <= tp) { h.outcome = 'WIN';  changed = true; }
+        const entryP = parseFloat(h.price);
+        const riskR  = Math.abs(entryP - sl);
+        // include the candle that was active when signal fired
+        for (const c of candles) {
+            if (c.time < h.ts - intervalMs) continue;
+            if (h.direction === 'BUY') {
+                if (c.low <= sl)  { h.outcome = 'LOSS'; h.pnlR = riskR > 0 ? -(entryP - sl) / riskR : -1; changed = true; break; }
+                if (c.high >= tp) { h.outcome = 'WIN';  h.pnlR = riskR > 0 ?  (tp - entryP) / riskR :  1; changed = true; break; }
+            } else {
+                if (c.high >= sl) { h.outcome = 'LOSS'; h.pnlR = riskR > 0 ? -(sl - entryP) / riskR : -1; changed = true; break; }
+                if (c.low  <= tp) { h.outcome = 'WIN';  h.pnlR = riskR > 0 ?  (entryP - tp) / riskR :  1; changed = true; break; }
+            }
         }
     }
     if (changed) { saveHistory(history); renderHistory(); renderStatusFooter(); }
 }
 
 function clearHistory() {
-    if (!confirm('Clear all signal history?')) return;
+    if (!confirm('确认清空所有历史信号记录？')) return;
     localStorage.removeItem(HISTORY_KEY);
     renderHistory(); renderStatusFooter();
 }
@@ -880,7 +1357,7 @@ function renderHistory() {
     const list    = document.getElementById('histList');
 
     if (!history.length) {
-        list.innerHTML = '<div class="empty-hist">No signals yet</div>';
+        list.innerHTML = '<div class="empty-hist">暂无信号记录</div>';
         return;
     }
 
@@ -890,7 +1367,7 @@ function renderHistory() {
         const o    = h.outcome;
         const dotCls = o === 'WIN' ? 'win' : o === 'LOSS' ? 'loss' : 'open';
         const dirCls = h.direction === 'BUY' ? 'buy' : 'sell';
-        const dirTxt = h.direction === 'BUY' ? '▲ BUY' : '▼ SELL';
+        const dirTxt = h.direction === 'BUY' ? '▲ 做多' : '▼ 做空';
         return '<div class="hist-row">'
             + '<span class="h-dot ' + dotCls + '"></span>'
             + '<span class="h-dir ' + dirCls + '">' + dirTxt + '</span>'
@@ -913,12 +1390,141 @@ function renderStatusFooter() {
     if (resolved.length >= 3) {
         const total = (wins / resolved.length * 100).toFixed(0);
         const r20   = recent.length >= 3
-            ? ' · L20: ' + (recentW / recent.length * 100).toFixed(0) + '%'
+            ? ' · 近20笔：' + (recentW / recent.length * 100).toFixed(0) + '%'
             : '';
-        wr.textContent = 'W/R: ' + total + '% (' + wins + '/' + resolved.length + ')' + r20 + ' · Open: ' + open;
+        wr.textContent = '胜率：' + total + '%（' + wins + '/' + resolved.length + '）' + r20 + ' · 持仓中：' + open + ' 笔';
     } else {
-        wr.textContent = 'W/R: — · Open: ' + open + ' · Need ≥3 resolved';
+        const need = Math.max(0, 3 - resolved.length);
+        wr.textContent = '胜率：暂无 · 持仓中：' + open + ' 笔 · 还差 ' + need + ' 笔信号才显示胜率';
     }
+}
+
+/* ── Multi-timeframe alignment helper ─────────────────────── */
+function buildMtfRow(sig, isBuy) {
+    if (sig.direction === 'NEUTRAL') return { text: '方向中性，无MTF过滤', color: 'var(--text-muted)' };
+    const h4 = sig.h4Trend;
+    const h1 = sig.h1Trend;
+    const m15Dir = sig.raw.ema20 > sig.raw.ema50 ? 'bull' : 'bear';
+    const expected = isBuy ? 'bull' : 'bear';
+
+    const fmt4 = h4 ? (h4 === 'bull' ? '多头' : '空头') : '—';
+    const fmt1 = h1 ? (h1 === 'bull' ? '多头' : '空头') : '—';
+    const fmt15 = '触发';
+
+    const h4Align = !h4 || h4 === expected;
+    const h1Align = !h1 || h1 === expected;
+    const allAlign = h4Align && h1Align;
+
+    return {
+        text: '4h [' + fmt4 + '] · 1h [' + fmt1 + '] · 15m [' + fmt15 + ']',
+        color: allAlign ? 'var(--green)' : 'var(--yellow)',
+    };
+}
+
+/* ================================================================
+   RENDER INSIGHT CARD
+   ================================================================ */
+function renderInsightCard(sig) {
+    const el = document.getElementById('insightCard');
+    if (!el) return;
+    const parts = [];
+
+    if (!sig || newsMode) {
+        parts.push('<div class="ic-title">📊 当前状态：观望中</div>');
+        parts.push('<div class="ic-row">➜ 等待行情数据加载…</div>');
+        el.innerHTML = parts.join('');
+        return;
+    }
+
+    const score       = sig.score;
+    const aboveThresh = score >= PRESETS.base.SIG_THRESHOLD;
+    const isBlocked   = !sig.risk.pass;
+    const isBuy       = sig.direction === 'BUY';
+    const vs          = sig.votes;
+    const fmtP        = v => '$' + Number(v).toLocaleString('en-US',
+        { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    const fmtP2       = v => '$' + Number(v).toLocaleString('en-US',
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    if (isBlocked && aboveThresh) {
+        // 评分达标但被风控拦截
+        parts.push('<div class="ic-title">📊 评分达标 — 已拦截</div>');
+        parts.push('<div class="ic-row ic-warn">⚠️ ' + sig.risk.reason + '</div>');
+    } else if (!aboveThresh) {
+        // 观望：距离触发差几分，哪几个指标未对齐
+        parts.push('<div class="ic-title">📊 当前状态：观望中</div>');
+        const gap    = Math.max(0, PRESETS.base.SIG_THRESHOLD - score);
+        const dirTxt = isBuy ? '做多' : sig.direction === 'SELL' ? '做空' : '交易';
+        parts.push('<div class="ic-row">➜ 距 <em>' + dirTxt + '</em> 信号还差 <em>'
+            + gap + ' 分</em>（当前 <em>' + score + '/100</em>，需 ≥ '
+            + PRESETS.base.SIG_THRESHOLD + '）</div>');
+
+        // 未对齐的指标
+        const notAligned = [];
+        if (isBuy  && vs.rsi  <= 0) notAligned.push('RSI（未超卖）');
+        if (!isBuy && vs.rsi  >= 0) notAligned.push('RSI（未超买）');
+        if (isBuy  && vs.bb   <= 0) notAligned.push('BB（未触下轨）');
+        if (!isBuy && vs.bb   >= 0) notAligned.push('BB（未触上轨）');
+        if (isBuy  && vs.vwap <= 0) notAligned.push('VWAP（价格未跌破）');
+        if (!isBuy && vs.vwap >= 0) notAligned.push('VWAP（价格未突破）');
+        if (isBuy  && vs.mfi  <= 0) notAligned.push('MFI（资金未流出）');
+        if (!isBuy && vs.mfi  >= 0) notAligned.push('MFI（资金未流入）');
+        if (notAligned.length > 0)
+            parts.push('<div class="ic-row">➜ 未对齐：<em>' + notAligned.join('、') + '</em></div>');
+        {
+            const mtfRow = buildMtfRow(sig, isBuy);
+            parts.push('<div class="ic-row" style="color:' + mtfRow.color + '">➜ 周期对齐　' + mtfRow.text + '</div>');
+        }
+        if (score >= 60 && score < PRESETS.base.SIG_THRESHOLD) {
+            parts.push('<div class="ic-row ic-warn">⚠ 弱信号，建议减半仓位（若触发）</div>');
+        }
+        parts.push('<div class="ic-row">➜ 没有可执行的交易，继续等待</div>');
+    } else {
+        // 信号触发
+        const titleCls = isBuy ? 'ic-buy' : 'ic-sell';
+        const titleTxt = isBuy
+            ? '🟢 做多信号（评分 ' + score + '）'
+            : '🔴 做空信号（评分 ' + score + '）';
+        parts.push('<div class="ic-title ' + titleCls + '">' + titleTxt + '</div>');
+
+        if (sig.marketState === 'TRENDING_UP' || sig.marketState === 'TRENDING_DOWN') {
+            parts.push('<div class="ic-row ic-trend-warn">趋势市 — 均值回归胜率下降，建议观望</div>');
+        }
+
+        {
+            const mtfRow = buildMtfRow(sig, isBuy);
+            parts.push('<div class="ic-row" style="color:' + mtfRow.color + '">➜ 周期对齐　' + mtfRow.text + '</div>');
+        }
+
+        const entryP    = sig.raw.last;
+        const limitP    = isBuy ? entryP * 0.995 : entryP * 1.005;
+        const stopPrice = parseFloat(isBuy ? sig.stopLong : sig.stopShort);
+        const slPct     = (Math.abs(entryP - stopPrice) / entryP * 100).toFixed(2);
+
+        parts.push('<div class="ic-row">➜ 入场　市价 <em>' + fmtP(entryP)
+            + '</em>　或挂单 <em>' + fmtP2(limitP) + '</em></div>');
+        parts.push('<div class="ic-row">➜ 止损　<em>' + fmtP2(stopPrice)
+            + '</em>　（距入场 <em>' + slPct + '%</em>）跟踪止损，盈利 0.5R 后开始移动</div>');
+        parts.push('<div class="ic-row">➜ 止损状态　<em>等待激活</em></div>');
+
+        if (sig.volConfirm === 'strong') {
+            parts.push('<div class="ic-row" style="color:var(--green)">➜ 成交量放量确认 ✓</div>');
+        } else {
+            parts.push('<div class="ic-row">➜ 成交量正常</div>');
+        }
+
+        const hist     = loadHistory();
+        const resolved = hist.filter(r => r.outcome === 'WIN' || r.outcome === 'LOSS');
+        const wins     = resolved.filter(r => r.outcome === 'WIN').length;
+        if (resolved.length >= 3) {
+            parts.push('<div class="ic-row">➜ 历史胜率 <em>'
+                + (wins / resolved.length * 100).toFixed(0)
+                + '%</em>（' + wins + ' 胜 ' + (resolved.length - wins) + ' 负）</div>');
+        }
+        parts.push('<div class="ic-note">⚠️ 机器信号，实盘前请人工确认</div>');
+    }
+
+    el.innerHTML = parts.join('');
 }
 
 /* ================================================================
@@ -938,10 +1544,35 @@ function renderIndicatorPanel(sig) {
     ];
     if (sig.scores.vBonus) pillDefs.push({ name: 'V-BTM', score: sig.scores.vBonus, bonus: true });
     pillsWrap.innerHTML = pillDefs.map(p => {
-        const cls = p.bonus ? 'pill v-bonus' : (p.score >= 10 ? 'pill active' : 'pill');
+        let cls, tip;
+        if (p.bonus) {
+            cls = 'pill v-bonus'; tip = 'V型底加分';
+        } else if (p.score >= 18) {
+            cls = 'pill high';   tip = '高分 (18-25)';
+        } else if (p.score >= 8) {
+            cls = 'pill active'; tip = '中等 (8-17)';
+        } else {
+            cls = 'pill';        tip = '低分 (0-7)';
+        }
         const lbl = p.bonus ? '+' + p.score : p.score + '/25';
-        return '<span class="' + cls + '">' + p.name + ' ' + lbl + '</span>';
+        return '<span class="' + cls + '" title="' + tip + '">' + p.name + ' ' + lbl + '</span>';
     }).join('');
+
+    // ── BB 带宽显示 ───────────────────────────────────────────
+    const bbwEl = document.getElementById('bbWidthRow');
+    if (bbwEl && bb) {
+        const bbwPct = bb.width * 100;
+        let bbwLabel, bbwColor;
+        if (bbwPct > 6) {
+            bbwLabel = '趋势'; bbwColor = bb.pct < 0.5 ? 'var(--red)' : 'var(--green)';
+        } else if (bbwPct > 4) {
+            bbwLabel = '扩张'; bbwColor = 'var(--yellow)';
+        } else {
+            bbwLabel = '震荡'; bbwColor = 'var(--text-muted)';
+        }
+        bbwEl.innerHTML = 'BBW&nbsp;<span style="font-family:var(--font-mono)">' + bbwPct.toFixed(1) + '%</span>'
+            + '&nbsp;<span style="color:' + bbwColor + ';font-weight:600">' + bbwLabel + '</span>';
+    }
 
     // ── Vote row ──────────────────────────────────────────────
     const voteRow = document.getElementById('voteRow');
@@ -954,33 +1585,38 @@ function renderIndicatorPanel(sig) {
     ];
     const total = vs.rsi + vs.bb + vs.vwap + vs.mfi;
     const sumCls = total > 0 ? 'buy' : total < 0 ? 'sell' : 'neu';
-    const sumTxt = total > 0 ? '▲ BUY' : total < 0 ? '▼ SELL' : 'NEUTRAL';
-    voteRow.innerHTML = tags.map(t =>
-        '<span class="vote-tag">' + t.name + ' ' + (t.v > 0 ? '+1' : t.v < 0 ? '−1' : '0') + '</span>'
-    ).join('') + '<span class="vote-sum ' + sumCls + '">' + sumTxt + '</span>';
+    const sumTxt = total > 0 ? '▲ 做多' : total < 0 ? '▼ 做空' : '中性';
+    voteRow.innerHTML = tags.map(t => {
+        const vStr = t.v > 0 ? '+1' : t.v < 0 ? '−1' : '0';
+        const tip  = t.v > 0 ? '+1 = 看多该指标' : t.v < 0 ? '-1 = 看空该指标' : '0 = 中性';
+        return '<span class="vote-tag" title="' + tip + '">' + t.name + ' ' + vStr + '</span>';
+    }).join('') + '<span class="vote-sum ' + sumCls + '">' + sumTxt + '</span>';
 
     // ── Collapsible detail ────────────────────────────────────
     if (!detailOpen) return;
     const vwapDev = vwap ? ((last - vwap) / vwap * 100) : null;
     const rows = [
         { name: 'RSI(14)',  val: rsi ? rsi.toFixed(1) : '--',
-          sub: rsi < 30 ? 'OVERSOLD' : rsi > 70 ? 'OVERBOUGHT' : 'NEUTRAL',
+          sub: rsi < 30 ? '超卖' : rsi > 70 ? '超买' : '中性',
           vote: vs.rsi, bar: rsi / 100 },
         { name: 'BB%',      val: bb ? (bb.pct * 100).toFixed(1) + '%' : '--',
-          sub: bb && bb.pct < 0.2 ? 'NEAR LOW' : bb && bb.pct > 0.8 ? 'NEAR HIGH' : 'MID',
+          sub: bb && bb.pct < 0.2 ? '接近下轨' : bb && bb.pct > 0.8 ? '接近上轨' : '中间位置',
           vote: vs.bb, bar: bb ? bb.pct : 0.5 },
-        { name: 'VWAP dev', val: vwapDev != null ? (vwapDev > 0 ? '+' : '') + vwapDev.toFixed(2) + '%' : '--',
+        { name: 'VWAP偏差', val: vwapDev != null ? (vwapDev > 0 ? '+' : '') + vwapDev.toFixed(2) + '%' : '--',
           sub: vwap ? '$' + vwap.toFixed(0) : 'N/A',
           vote: vs.vwap, bar: vwapDev != null ? Math.min(1, Math.abs(vwapDev) / 3) : 0 },
         { name: 'MFI(14)',  val: mfi.toFixed(1),
-          sub: mfi < 30 ? 'OVERSOLD' : mfi > 70 ? 'OVERBOUGHT' : 'NEUTRAL',
+          sub: mfi < 30 ? '超卖' : mfi > 70 ? '超买' : '中性',
           vote: vs.mfi, bar: mfi / 100 },
-        { name: 'Vol ratio',val: volRatio.toFixed(2) + '×',
-          sub: volSpike ? 'SPIKE — BLOCKED' : volRatio >= 1.5 ? 'HIGH' : 'NORMAL',
+        { name: '成交量倍数',val: volRatio.toFixed(2) + '×',
+          sub: volSpike ? '异常成交量 — 已拦截' : volRatio >= 1.5 ? '偏高' : '正常',
           vote: 0, bar: Math.min(1, volRatio / 3) },
         { name: 'EMA 20/50',val: ema20.toFixed(0) + ' / ' + ema50.toFixed(0),
-          sub: ema20 > ema50 ? 'BULL' : 'BEAR',
+          sub: ema20 > ema50 ? '多头' : '空头',
           vote: 0, bar: null },
+        { name: 'BB带宽',    val: bb ? (bb.width * 100).toFixed(2) + '%' : '--',
+          sub: bb ? (bb.width * 100 > 6 ? '趋势行情' : bb.width * 100 > 4 ? '带宽扩张' : '震荡行情') : '--',
+          vote: 0, bar: bb ? Math.min(1, bb.width / 0.08) : 0 },
     ];
     const barColor = score => score >= 60 ? 'var(--green)' : score >= 30 ? 'var(--accent)' : 'var(--text-muted)';
     document.getElementById('detailRows').innerHTML = rows.map(r => {
@@ -1017,8 +1653,8 @@ function renderSignalCard(sig) {
     if (newsMode || !sig) {
         sigPanel.classList.add('sig-state-waiting');
         statusEl.className  = '';
-        statusEl.textContent = 'SUPPRESSED';
-        subEl.textContent    = newsMode ? 'NEWS MODE ACTIVE' : '';
+        statusEl.textContent = '已暂停';
+        subEl.textContent    = newsMode ? '消息面模式已开启' : '';
         barWrap.style.display = 'block';
         barFill.style.width   = '0%';
         legend.textContent    = '';
@@ -1028,7 +1664,7 @@ function renderSignalCard(sig) {
     }
 
     const score         = sig.score;
-    const aboveThresh   = score >= CONFIG.SIG_THRESHOLD;
+    const aboveThresh   = score >= PRESETS.base.SIG_THRESHOLD;
     const isBlocked     = !sig.risk.pass;
     const fmt           = v => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 });
 
@@ -1038,8 +1674,8 @@ function renderSignalCard(sig) {
         // ── BLOCKED ─────────────────────────────────────────
         sigPanel.classList.add('sig-state-blocked');
         statusEl.className   = 'blocked';
-        statusEl.textContent = '⊘ BLOCKED';
-        subEl.textContent    = score + ' / 100 · ' + sig.direction;
+        statusEl.textContent = '⊘ 已拦截';
+        subEl.textContent    = score + ' / 100 · ' + (sig.direction === 'BUY' ? '做多' : sig.direction === 'SELL' ? '做空' : '中性');
         barWrap.style.display = 'block';
         legend.textContent    = sig.strength;
         blocked.style.display = 'block';
@@ -1054,11 +1690,15 @@ function renderSignalCard(sig) {
         // ── WAITING ──────────────────────────────────────────
         sigPanel.classList.add('sig-state-waiting');
         statusEl.className   = '';
-        statusEl.textContent = 'WAITING';
-        const tendTxt = sig.direction === 'NEUTRAL' ? 'NEUTRAL' : sig.direction + ' tendency';
+        statusEl.textContent = '观望中';
+        const tendTxt = sig.direction === 'NEUTRAL' ? '中性' : sig.direction === 'BUY' ? '做多倾向' : '做空倾向';
         subEl.textContent    = tendTxt;
         barWrap.style.display = 'block';
-        legend.textContent    = score + ' / 100 — need ≥' + CONFIG.SIG_THRESHOLD;
+        if (score >= 60 && score < PRESETS.base.SIG_THRESHOLD) {
+            legend.innerHTML = '<span style="color:var(--yellow)">⚠ 弱信号 ' + score + ' / 100 — 接近触发阈值</span>';
+        } else {
+            legend.textContent = score + ' / 100 — 需达到' + PRESETS.base.SIG_THRESHOLD + '分';
+        }
         entryTbl.style.display = 'none';
         return;
     }
@@ -1067,37 +1707,39 @@ function renderSignalCard(sig) {
     const isBuy = sig.direction === 'BUY';
     sigPanel.classList.add(isBuy ? 'sig-state-buy' : 'sig-state-sell');
     statusEl.className   = isBuy ? 'buy' : 'sell';
-    statusEl.textContent = isBuy ? '▲ BUY' : '▼ SELL';
+    statusEl.textContent = isBuy ? '▲ 做多' : '▼ 做空';
     flash(statusEl);
-    subEl.textContent    = sig.strength + ' · ' + score + ' / 100';
+    const strengthColor = score >= 85
+        ? (isBuy ? 'var(--green)' : 'var(--red)')
+        : 'inherit';
+    subEl.innerHTML = '<span style="color:' + strengthColor + ';font-weight:' + (score>=85?'700':'400') + '">'
+        + sig.strength + '</span> · ' + score + ' / 100';
     barWrap.style.display = 'none';
     legend.textContent    = '';
 
     const entryP    = sig.raw.last;
-    const stopPrice = isBuy ? sig.stopLong : sig.stopShort;
-    const bbMid     = sig.raw.bb ? sig.raw.bb.middle : null;
-    const tpFb      = isBuy
-        ? (entryP * (1 + CONFIG.TAKE_PROFIT_PCT)).toFixed(2)
-        : (entryP * (1 - CONFIG.TAKE_PROFIT_PCT)).toFixed(2);
-    const tpVal     = bbMid ? fmt(bbMid) : fmt(tpFb);
-    const tpSub     = bbMid ? ' <small style="color:var(--text-muted);font-weight:400">BB MID</small>' : '';
-    const rrRatio   = (CONFIG.TAKE_PROFIT_PCT / CONFIG.STOP_LOSS_PCT).toFixed(2);
+    const stopPrice = isBuy ? sig.stopLong  : sig.stopShort;
+    const tpPrice   = isBuy ? sig.tpLong    : sig.tpShort;
+    const tpVal     = fmt(tpPrice);
+    const tpSub     = '';
+    const rrRatio   = sig.rrRatio;
+    const slPct     = (Math.abs(entryP - parseFloat(stopPrice)) / entryP * 100).toFixed(1);
 
     const hist     = loadHistory();
     const resolved = hist.filter(h => h.outcome === 'WIN' || h.outcome === 'LOSS');
     const wins     = resolved.filter(h => h.outcome === 'WIN').length;
     const wrVal    = resolved.length >= 3
-        ? (wins / resolved.length * 100).toFixed(0) + '% (' + wins + '/' + resolved.length + ')'
-        : resolved.length > 0 ? wins + '/' + resolved.length + ' (need more data)' : '—';
+        ? (wins / resolved.length * 100).toFixed(0) + '%（' + wins + '/' + resolved.length + '）'
+        : resolved.length > 0 ? wins + '/' + resolved.length + '（样本不足）' : '—';
 
     entryTbl.style.display = 'grid';
     entryTbl.innerHTML =
-        row('ENTRY',         fmt(entryP),                       '')
-      + row('TARGET',        tpVal + tpSub,                     'tp')
-      + row('STOP LOSS',     fmt(stopPrice) + ' &nbsp;−' + (CONFIG.STOP_LOSS_PCT * 100).toFixed(1) + '%', 'sl')
-      + row('R : R RATIO',   rrRatio + ' : 1',                  'rr')
-      + (sig.raw.vBottom ? rowFull('V-BOTTOM', '+10 pts bonus', 'tp') : '')
-      + rowFull('WIN RATE', wrVal, 'wr');
+        row('进场价',   fmt(entryP),                       '')
+      + row('目标价',   tpVal + tpSub,                     'tp')
+      + row('止损价',   fmt(stopPrice) + ' &nbsp;−' + slPct + '%', 'sl')
+      + row('盈亏比',   '1 : ' + rrRatio,                  'rr')
+      + (sig.raw.vBottom ? rowFull('V型底', '+10分加成', 'tp') : '')
+      + rowFull('历史胜率', wrVal, 'wr');
 
     function row(label, val, cls) {
         return '<div class="et-row">'
@@ -1117,21 +1759,87 @@ function renderSignalCard(sig) {
    MAIN SIGNAL RUN (every 30s)
    ================================================================ */
 async function runSignal() {
+    if (typeof autoBackfill._ran === 'undefined') {
+        autoBackfill._ran = true;
+        autoBackfill(); // 后台静默运行，不 await
+    }
+    if (signalRunning) return;
+    signalRunning = true;
     try {
-        const candles = await fetchOHLC(CONFIG.INTERVAL_15M);
+        const [candles, h1Candles, h4Candles] = await Promise.all([
+            fetchOHLC(15), fetchOHLC(60), fetchOHLC(240)
+        ]);
         const closes  = candles.map(c => c.close);
         const volumes = candles.map(c => c.volume);
-        const last    = closes[closes.length - 1];
 
-        updateOpenSignals(last);
-        const sig = generateSignal(closes, candles, volumes);
+        updateOpenSignals(candles);
+        const sig = generateSignal(closes, candles, volumes, null, h1Candles, h4Candles);
         renderSignalCard(sig);
+        renderInsightCard(sig);
         renderIndicatorPanel(sig);
+        updateMktBadge(sig.marketState);
         logSignal(sig);
         renderHistory();
         renderStatusFooter();
     } catch (err) {
-        document.getElementById('sfConn').textContent = 'OHLC error: ' + err.message;
+        document.getElementById('sfConn').textContent = '数据错误：' + err.message;
+    } finally {
+        signalRunning = false;
+    }
+}
+
+function calcPositionSize() {
+    const el     = document.getElementById('posResult');
+    const equity = parseFloat(document.getElementById('posEquity').value);
+    if (!equity || equity <= 0) { el.innerHTML = '输入账户净值后显示建议仓位…'; return; }
+
+    const hist     = loadHistory();
+    const resolved = hist.filter(r => r.outcome === 'WIN' || r.outcome === 'LOSS').slice(-20);
+
+    if (resolved.length < 10) {
+        el.innerHTML = '历史样本不足，建议固定 <em>1%</em> 仓位（≈ $'
+            + (equity * 0.01).toFixed(0) + ')';
+        return;
+    }
+
+    const wins   = resolved.filter(r => r.outcome === 'WIN');
+    const losses = resolved.filter(r => r.outcome === 'LOSS');
+    const W      = wins.length / resolved.length;
+    const avgW   = wins.length   > 0 ? wins.reduce((s, r)   => s + (r.pnlR != null ? r.pnlR        : 1), 0) / wins.length   : 1;
+    const avgL   = losses.length > 0 ? losses.reduce((s, r) => s + (r.pnlR != null ? Math.abs(r.pnlR) : 1), 0) / losses.length : 1;
+    const kelly  = Math.max(0, W - (1 - W) / (avgW / avgL));
+    const frac   = kelly * 0.25;
+
+    const priceEl = document.getElementById('tb-price');
+    const price   = parseFloat(priceEl ? priceEl.dataset.last : 0) || 0;
+    const posUSD  = equity * frac;
+    const posBTC  = price > 0 ? posUSD / price : 0;
+
+    const last3 = resolved.slice(-3);
+    const streak = last3.length === 3 && last3.every(r => r.outcome === 'LOSS');
+
+    let html = '建议仓位 <em>$' + posUSD.toFixed(0) + '</em>'
+        + (posBTC > 0 ? '（≈ <em>' + posBTC.toFixed(4) + ' BTC</em>）' : '')
+        + ' — 凯利 ' + (kelly * 100).toFixed(1) + '% × 0.25 保守系数';
+    if (streak)
+        html += '<br><span class="warn-loss">⚠ 连亏警告，建议减半：$' + (posUSD / 2).toFixed(0) + '</span>';
+
+    el.innerHTML = html;
+}
+
+function updateMktBadge(state) {
+    const el = document.getElementById('mktBadge');
+    if (!el) return;
+    el.style.display = '';
+    if (state === 'TRENDING_UP') {
+        el.className = 'mkt-badge trend-up';
+        el.textContent = '趋势↑';
+    } else if (state === 'TRENDING_DOWN') {
+        el.className = 'mkt-badge trend-dn';
+        el.textContent = '趋势↓';
+    } else {
+        el.className = 'mkt-badge ranging';
+        el.textContent = '震荡市';
     }
 }
 
@@ -1139,6 +1847,8 @@ async function runSignal() {
    DUAL TIMERS  5s ticker · 30s OHLC
    ================================================================ */
 function startTimers() {
+    if (window._timersStarted) return;
+    window._timersStarted = true;
     setInterval(() => {
         tickerCountdown--;
         document.getElementById('nextTicker').textContent = tickerCountdown + 's';
@@ -1155,8 +1865,256 @@ function startTimers() {
    ================================================================ */
 fetchTicker();
 runSignal();
+renderInsightCard(null);
 renderHistory();
 renderStatusFooter();
-startTimers();</script>
+startTimers();
+
+/* ── 内置回测引擎 ──────────────────────────────────────────── */
+const BT_SLIPPAGE = 0.0010;
+const BT_FEE      = 0.0026;
+const BT_COST     = BT_SLIPPAGE + BT_FEE;
+
+async function btFetchCandles(days) {
+  const endTime   = Date.now();
+  const startTime = endTime - days * 86400 * 1000;
+  const LIMIT     = 100;
+  const STEP      = LIMIT * 15 * 60 * 1000;
+  let   all       = [];
+  let   winStart  = startTime;
+  while (winStart < endTime) {
+    const winEnd = Math.min(winStart + STEP, endTime);
+    const url    = `https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT&bar=15m&limit=${LIMIT}&after=${winEnd}&before=${winStart}`;
+    const resp   = await fetch(url);
+    const json   = await resp.json();
+    if (json.data && json.data.length) {
+      for (const c of json.data) {
+        all.push({ time:parseInt(c[0]), open:parseFloat(c[1]), high:parseFloat(c[2]), low:parseFloat(c[3]), close:parseFloat(c[4]), volume:parseFloat(c[5]) });
+      }
+    }
+    winStart = winEnd + 1;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  const seen = new Set();
+  all = all.filter(c => seen.has(c.time) ? false : seen.add(c.time));
+  all.sort((a, b) => a.time - b.time);
+  return all;
+}
+
+async function btFetchCandlesN(days, bar, intervalSec) {
+  const endTime   = Date.now();
+  const startTime = endTime - days * 86400 * 1000;
+  const LIMIT     = 100;
+  const STEP      = LIMIT * intervalSec * 1000;
+  let all = [], winStart = startTime;
+  while (winStart < endTime) {
+    const winEnd = Math.min(winStart + STEP, endTime);
+    const url = `https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT&bar=${bar}&limit=${LIMIT}&after=${winEnd}&before=${winStart}`;
+    try {
+      const resp = await fetch(url);
+      const json = await resp.json();
+      if (json.data && json.data.length) {
+        for (const c of json.data) {
+          all.push({ time:parseInt(c[0]), open:parseFloat(c[1]), high:parseFloat(c[2]), low:parseFloat(c[3]), close:parseFloat(c[4]), volume:parseFloat(c[5]) });
+        }
+      }
+    } catch(e) { }
+    winStart = winEnd + 1;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  const seen = new Set();
+  all = all.filter(c => seen.has(c.time) ? false : seen.add(c.time));
+  all.sort((a, b) => a.time - b.time);
+  return all;
+}
+
+function btJudgeOutcome(entryIdx, direction, entry, sl, candles, cfg) {
+  const isBuy   = direction === 'BUY';
+  const TRAIL_ACTIVATION = cfg.TRAIL_ACTIVATION ?? 1.0;
+  const TRAIL_STEP       = cfg.TRAIL_STEP       ?? 0.5;
+  const effEntry  = isBuy ? entry*(1+BT_COST) : entry*(1-BT_COST);
+  const slDist    = Math.min(Math.abs(entry-sl), entry*0.012);
+  const initSL    = isBuy ? entry-slDist : entry+slDist;
+  const effInitSL = isBuy ? initSL*(1-BT_COST) : initSL*(1+BT_COST);
+  const R         = Math.abs(effEntry-effInitSL);
+  if (R === 0) return { status:'DRAW', pnlR:0 };
+  let trailStop = initSL, highWater = entry, trailActive = false;
+  // 索引法：直接从 entryIdx+1 取，O(1) 而非 O(n) filter
+  const future = candles.slice(entryIdx + 1, entryIdx + 1 + cfg.MAX_HOLD_HOURS * 4);
+  for (const c of future) {
+    if (isBuy) {
+      if (c.low <= trailStop) { const e=trailStop*(1-BT_COST); const p=(e-effEntry)/R; return {status:p>=0?'WIN':'LOSS',pnlR:p}; }
+      if (c.high > highWater) highWater = c.high;
+      const profit = (highWater*(1-BT_COST)-effEntry)/R;
+      if (!trailActive && profit >= TRAIL_ACTIVATION) { trailActive=true; const ip=entry-0.2*R; if(ip>trailStop) trailStop=ip; }
+      if (trailActive) { const ns=highWater-TRAIL_STEP*R; if(ns>trailStop) trailStop=ns; }
+    } else {
+      if (c.high >= trailStop) { const e=trailStop*(1+BT_COST); const p=(effEntry-e)/R; return {status:p>=0?'WIN':'LOSS',pnlR:p}; }
+      if (c.low < highWater) highWater = c.low;
+      const profit = (effEntry-highWater*(1+BT_COST))/R;
+      if (!trailActive && profit >= TRAIL_ACTIVATION) { trailActive=true; const ip=entry+0.2*R; if(ip<trailStop) trailStop=ip; }
+      if (trailActive) { const ns=highWater+TRAIL_STEP*R; if(ns<trailStop) trailStop=ns; }
+    }
+  }
+  const lp = future.length > 0 ? future[future.length-1].close : entry;
+  const exitEff = isBuy ? lp*(1-BT_COST) : lp*(1+BT_COST);
+  const pnlR = isBuy ? (exitEff-effEntry)/R : (effEntry-exitEff)/R;
+  const status = pnlR >= cfg.TIMEOUT_R_RATIO ? 'WIN' : pnlR <= -cfg.TIMEOUT_R_RATIO ? 'LOSS' : 'DRAW';
+  return { status, pnlR };
+}
+
+async function runBacktest() {
+  const days      = parseInt(document.getElementById('btDays').value);
+  const presetKey = document.getElementById('btPreset').value;
+  const cfg       = PRESETS[presetKey];
+  const btn       = document.getElementById('btRunBtn');
+  const log       = document.getElementById('btLog');
+  const stats     = document.getElementById('btStats');
+
+  btn.disabled = true;
+  btn.textContent = '拉取数据中…';
+  stats.style.display = 'none';
+  log.innerHTML = '正在从 OKX 拉取 BTC-USDT 15m K线…';
+
+  try {
+    log.innerHTML = '正在拉取 15m K线…';
+    const candles = await btFetchCandles(days);
+    log.innerHTML += `　15m: ${candles.length}根`;
+
+    log.innerHTML += '　正在拉取 1h K线…';
+    const h1BtCandles = await btFetchCandlesN(days, '1H', 3600);
+    log.innerHTML += `　1h: ${h1BtCandles.length}根`;
+
+    log.innerHTML += '　正在拉取 4h K线…';
+    const h4BtCandles = await btFetchCandlesN(days, '4H', 14400);
+    log.innerHTML += `　4h: ${h4BtCandles.length}根<br>开始回放…<br>`;
+
+    const WARMUP   = 60;
+    const WINDOW   = 200;
+    const DEDUP_MS = 30 * 60 * 1000;
+    let lastSigTs  = { BUY: 0, SELL: 0 };
+    const results  = [];
+
+    // 指针法：O(n) 替代 filter O(n²)
+    let h1Ptr = 0, h4Ptr = 0;
+    let logBuf = '';
+
+    for (let i = WARMUP; i < candles.length - 1; i++) {
+      // 每200根yield一次保持UI响应，同时刷新日志缓冲
+      if (i % 200 === 0) {
+        log.innerHTML += `进度 ${((i / candles.length) * 100).toFixed(0)}%… ` + logBuf;
+        logBuf = '';
+        log.scrollTop = log.scrollHeight;
+        await new Promise(r => setTimeout(r, 0));
+      }
+
+      const ts15 = candles[i].time;
+
+      // 推进 h1 指针（排好序，单调递增）
+      while (h1Ptr < h1BtCandles.length && h1BtCandles[h1Ptr].time <= ts15) h1Ptr++;
+      const h1Slice = h1BtCandles.slice(Math.max(0, h1Ptr - 100), h1Ptr);
+
+      // 推进 h4 指针
+      while (h4Ptr < h4BtCandles.length && h4BtCandles[h4Ptr].time <= ts15) h4Ptr++;
+      const h4Slice = h4BtCandles.slice(Math.max(0, h4Ptr - 100), h4Ptr);
+
+      const slice   = candles.slice(Math.max(0, i - WINDOW + 1), i + 1);
+      const closes  = slice.map(c => c.close);
+      const volumes = slice.map(c => c.volume);
+      const sig     = generateSignal(closes, slice, volumes, cfg, h1Slice, h4Slice);
+      if (!sig || sig.score < cfg.SIG_THRESHOLD || !sig.risk.pass) continue;
+
+      const ts = candles[i].time;
+      const dir = sig.direction;
+      if (ts - lastSigTs[dir] < DEDUP_MS) continue;
+      lastSigTs[dir] = ts;
+
+      const stop = dir === 'BUY' ? sig.stopLong : sig.stopShort;
+      // 用索引法替代 filter，O(1) 定位 future 起点
+      const res  = btJudgeOutcome(i, dir, sig.raw.last, parseFloat(stop), candles, cfg);
+      results.push({ ts, dir, score: sig.score, price: sig.raw.last, marketState: sig.marketState, h4Trend: sig.h4Trend, ...res });
+      const icon = res.status === 'WIN' ? '<span class="win">✓</span>' : res.status === 'LOSS' ? '<span class="loss">✗</span>' : '<span class="draw">⏸</span>';
+      const time = new Date(ts).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+      const mktTag = sig.marketState === 'RANGING' ? '' : sig.marketState === 'TRENDING_UP' ? ' <span style="color:var(--green)">[趋势↑]</span>' : ' <span style="color:var(--red)">[趋势↓]</span>';
+      logBuf += `${icon} [${time}] ${dir} @$${sig.raw.last.toFixed(0)} 分:${sig.score}${mktTag} → ${res.status} (${res.pnlR>=0?'+':''}${res.pnlR.toFixed(2)}R)<br>`;
+    }
+    // 刷新剩余日志
+    if (logBuf) { log.innerHTML += logBuf; log.scrollTop = log.scrollHeight; }
+
+    const wins   = results.filter(r => r.status==='WIN');
+    const losses = results.filter(r => r.status==='LOSS');
+    const total  = wins.length + losses.length;
+    const wr     = total > 0 ? wins.length/total : 0;
+    const awR    = wins.length   > 0 ? wins.reduce((s,r)=>s+r.pnlR,0)/wins.length   : 0;
+    const alR    = losses.length > 0 ? losses.reduce((s,r)=>s+Math.abs(r.pnlR),0)/losses.length : 0;
+    const ev     = total > 0 ? wr*awR - (1-wr)*alR : null;
+
+    document.getElementById('btN').textContent  = results.length;
+    document.getElementById('btWR').textContent = total > 0 ? (wr*100).toFixed(1)+'%' : '—';
+    const evEl = document.getElementById('btEV');
+    evEl.textContent = ev != null ? (ev>=0?'+':'')+ev.toFixed(3)+'R' : '—';
+    evEl.className   = 'bt-stat-val ' + (ev > 0 ? 'pos' : ev < 0 ? 'neg' : '');
+    document.getElementById('btAW').textContent = wins.length   > 0 ? '+'+awR.toFixed(3)+'R' : '—';
+    document.getElementById('btAL').textContent = losses.length > 0 ? '-'+alR.toFixed(3)+'R' : '—';
+    stats.style.display = 'grid';
+
+    // EV 对比基准
+    const BT_BASELINE_KEY = 'bt_baseline_ev';
+    const cmpEl  = document.getElementById('btEvCmp');
+    const cmpTxt = document.getElementById('btEvCmpText');
+    if (ev != null) {
+      const baseline = localStorage.getItem(BT_BASELINE_KEY);
+      if (baseline === null) {
+        localStorage.setItem(BT_BASELINE_KEY, ev.toFixed(4));
+        cmpTxt.innerHTML = '首次运行，已记录为基准 <em>' + (ev>=0?'+':'') + ev.toFixed(3) + 'R</em>';
+      } else {
+        const base = parseFloat(baseline);
+        const diff = ev - base;
+        const sign = diff >= 0 ? '+' : '';
+        const cls  = diff > 0 ? 'pos' : diff < 0 ? 'neg' : '';
+        const arr  = diff > 0 ? '↑' : diff < 0 ? '↓' : '→';
+        cmpTxt.innerHTML = '基准期望值：<em>' + (base>=0?'+':'') + base.toFixed(3) + 'R</em>'
+          + ' → 当前：<em>' + (ev>=0?'+':'') + ev.toFixed(3) + 'R</em>'
+          + '　变化：<em class="' + cls + '">' + sign + diff.toFixed(3) + 'R ' + arr + '</em>';
+      }
+      cmpEl.style.display = 'flex';
+    }
+
+    log.innerHTML += `<br>─── 完成 [${cfg.name}] ─── 信号:${results.length} WIN:${wins.length} LOSS:${losses.length} 胜率:${total>0?(wr*100).toFixed(1)+'%':'—'} 期望:${ev!=null?(ev>=0?'+':'')+ev.toFixed(3)+'R':'—'}`;
+
+    // 4h趋势分组统计
+    const hasH4 = results.some(r => r.h4Trend);
+    if (hasH4) {
+      log.innerHTML += '<br><br>4h趋势分解：';
+      for (const [trend, label, color] of [
+        ['bull', 'bull（4h多头）', 'var(--green)'],
+        ['bear', 'bear（4h空头）', 'var(--red)'],
+        [null,   '未知（4h数据不足）', 'var(--text-muted)'],
+      ]) {
+        const grp = results.filter(r => r.h4Trend === trend);
+        if (grp.length === 0) continue;
+        const gW  = grp.filter(r => r.status === 'WIN').length;
+        const gL  = grp.filter(r => r.status === 'LOSS').length;
+        const gT  = gW + gL;
+        const gWR = gT > 0 ? (gW / gT * 100).toFixed(0) + '%' : '—';
+        log.innerHTML += `<br><span style="color:${color}">${label}</span>  ${grp.length}笔  WIN:${gW} LOSS:${gL}  胜率${gWR}`;
+      }
+    }
+
+    log.scrollTop = log.scrollHeight;
+
+  } catch(err) {
+    log.innerHTML += `<br><span class="loss">错误：${err.message}</span>`;
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = '▶ 运行回测';
+  }
+}
+
+function btResetBaseline() {
+  localStorage.removeItem('bt_baseline_ev');
+  const cmpEl = document.getElementById('btEvCmp');
+  if (cmpEl) cmpEl.style.display = 'none';
+}</script>
 </body>
 </html>
