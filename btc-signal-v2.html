@@ -1079,6 +1079,23 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
     }
     const h4Trend = h4Ema20 !== null ? (h4Ema20 > h4Ema50 ? 'bull' : 'bear') : null;
 
+    // 反转确认过滤：要求最后一根K线出现反转方向
+    if (finalRisk.pass && candles.length >= 3) {
+        const cur  = candles[candles.length - 1];
+        const prev = candles[candles.length - 2];
+        if (direction === 'BUY') {
+            const isBullCandle  = cur.close > cur.open;
+            const isPriceRising = cur.close > prev.close;
+            if (!isBullCandle || !isPriceRising)
+                finalRisk = { pass: false, reason: '尚未出现反转K线，等待确认' };
+        } else if (direction === 'SELL') {
+            const isBearCandle   = cur.close < cur.open;
+            const isPriceFalling = cur.close < prev.close;
+            if (!isBearCandle || !isPriceFalling)
+                finalRisk = { pass: false, reason: '尚未出现反转K线，等待确认' };
+        }
+    }
+
     const marketState = detectMarketState(bb, ema20, ema50, last);
 
     return {
