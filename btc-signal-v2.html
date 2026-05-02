@@ -999,6 +999,10 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
     const volRatio20 = volAvg20 > 0 ? curVol / volAvg20 : 1;
     const volConfirm = volRatio20 > 1.3 ? 'strong' : volRatio20 < 0.7 ? 'weak' : 'normal';
 
+    const rsiPrev1 = closes.length > 2 ? calcRSI(closes.slice(0, -1)) : rsi;
+    const rsiPrev2 = closes.length > 3 ? calcRSI(closes.slice(0, -2)) : rsiPrev1;
+    const rsiSlope = rsi > rsiPrev1 ? 'up' : 'down';
+
     const rsiR  = scoreRSI(rsi);
     const bbR   = scoreBB(bb ? bb.pct : 0.5);
     const vwapR = vwap ? scoreVWAP((last - vwap) / vwap * 100) : { score: 0, vote: 0 };
@@ -1008,10 +1012,15 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
     const vBonus     = vBottom ? 10 : 0;
     const volBonus   = volConfirm === 'strong' ? 8 : 0;
     const baseScore  = rsiR.score + bbR.score + vwapR.score + mfiR.score;
-    const totalScore = Math.min(100, baseScore + vBonus + volBonus);
+    let   totalScore = Math.min(100, baseScore + vBonus + volBonus);
 
     const votes     = rsiR.vote + bbR.vote + vwapR.vote + mfiR.vote;
     const direction = votes > 0 ? 'BUY' : votes < 0 ? 'SELL' : 'NEUTRAL';
+
+    // RSI 斜率过滤：动量方向不一致扣15分
+    if (direction === 'BUY'  && !(rsi > rsiPrev1 && rsiPrev1 > rsiPrev2)) totalScore = Math.max(0, totalScore - 15);
+    if (direction === 'SELL' && !(rsi < rsiPrev1 && rsiPrev1 < rsiPrev2)) totalScore = Math.max(0, totalScore - 15);
+    totalScore = Math.min(100, totalScore);
 
     const risk = volSpike
         ? { pass: false, reason: 'Vol spike >20× avg — manipulation filter' }
@@ -1103,7 +1112,7 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
         scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, mfi: mfiR.score, vBonus },
         votes:  { rsi: rsiR.vote,  bb: bbR.vote,  vwap: vwapR.vote,  mfi: mfiR.vote  },
         raw:    { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last },
-        stopLong, stopShort, tpLong, tpShort, rrRatio, marketState, volConfirm, h4Trend,
+        stopLong, stopShort, tpLong, tpShort, rrRatio, marketState, volConfirm, h4Trend, rsiSlope,
     };
 }
 
