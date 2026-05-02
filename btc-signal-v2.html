@@ -1065,6 +1065,20 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
             finalRisk = { pass: false, reason: '1h趋势反向，信号降级' };
     }
 
+    let h4Ema20 = null, h4Ema50 = null;
+    if (h4Candles && h4Candles.length >= 55) {
+        const h4Closes = h4Candles.map(c => c.close);
+        h4Ema20 = calcEMA(h4Closes, 20);
+        h4Ema50 = calcEMA(h4Closes, 50);
+        if (finalRisk.pass) {
+            if (direction === 'BUY'  && h4Ema20 <= h4Ema50)
+                finalRisk = { pass: false, reason: '4h趋势向下，禁止做多' };
+            if (direction === 'SELL' && h4Ema20 >= h4Ema50)
+                finalRisk = { pass: false, reason: '4h趋势向上，禁止做空' };
+        }
+    }
+    const h4Trend = h4Ema20 !== null ? (h4Ema20 > h4Ema50 ? 'bull' : 'bear') : null;
+
     const marketState = detectMarketState(bb, ema20, ema50, last);
 
     return {
@@ -1072,7 +1086,7 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
         scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, mfi: mfiR.score, vBonus },
         votes:  { rsi: rsiR.vote,  bb: bbR.vote,  vwap: vwapR.vote,  mfi: mfiR.vote  },
         raw:    { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last },
-        stopLong, stopShort, tpLong, tpShort, rrRatio, marketState, volConfirm,
+        stopLong, stopShort, tpLong, tpShort, rrRatio, marketState, volConfirm, h4Trend,
     };
 }
 
