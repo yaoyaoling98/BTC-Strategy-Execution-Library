@@ -1927,7 +1927,7 @@ async function btFetchCandlesN(days, bar, intervalSec) {
   return all;
 }
 
-function btJudgeOutcome(entryTs, direction, entry, sl, candles, cfg) {
+function btJudgeOutcome(entryIdx, direction, entry, sl, candles, cfg) {
   const isBuy   = direction === 'BUY';
   const TRAIL_ACTIVATION = cfg.TRAIL_ACTIVATION ?? 1.0;
   const TRAIL_STEP       = cfg.TRAIL_STEP       ?? 0.5;
@@ -1938,7 +1938,8 @@ function btJudgeOutcome(entryTs, direction, entry, sl, candles, cfg) {
   const R         = Math.abs(effEntry-effInitSL);
   if (R === 0) return { status:'DRAW', pnlR:0 };
   let trailStop = initSL, highWater = entry, trailActive = false;
-  const future = candles.filter(c => c.time > entryTs).slice(0, cfg.MAX_HOLD_HOURS*4);
+  // 索引法：直接从 entryIdx+1 取，O(1) 而非 O(n) filter
+  const future = candles.slice(entryIdx + 1, entryIdx + 1 + cfg.MAX_HOLD_HOURS * 4);
   for (const c of future) {
     if (isBuy) {
       if (c.low <= trailStop) { const e=trailStop*(1-BT_COST); const p=(e-effEntry)/R; return {status:p>=0?'WIN':'LOSS',pnlR:p}; }
@@ -1993,33 +1994,51 @@ async function runBacktest() {
     let lastSigTs  = { BUY: 0, SELL: 0 };
     const results  = [];
 
+    // 指针法：O(n) 替代 filter O(n²)
+    let h1Ptr = 0, h4Ptr = 0;
+    let logBuf = '';
+
     for (let i = WARMUP; i < candles.length - 1; i++) {
-      if (i % 500 === 0) {
-        log.innerHTML += `进度 ${((i / candles.length) * 100).toFixed(0)}%… `;
+      // 每200根yield一次保持UI响应，同时刷新日志缓冲
+      if (i % 200 === 0) {
+        log.innerHTML += `进度 ${((i / candles.length) * 100).toFixed(0)}%… ` + logBuf;
+        logBuf = '';
         log.scrollTop = log.scrollHeight;
         await new Promise(r => setTimeout(r, 0));
       }
+
+      const ts15 = candles[i].time;
+
+      // 推进 h1 指针（排好序，单调递增）
+      while (h1Ptr < h1BtCandles.length && h1BtCandles[h1Ptr].time <= ts15) h1Ptr++;
+      const h1Slice = h1BtCandles.slice(Math.max(0, h1Ptr - 100), h1Ptr);
+
+      // 推进 h4 指针
+      while (h4Ptr < h4BtCandles.length && h4BtCandles[h4Ptr].time <= ts15) h4Ptr++;
+      const h4Slice = h4BtCandles.slice(Math.max(0, h4Ptr - 100), h4Ptr);
+
       const slice   = candles.slice(Math.max(0, i - WINDOW + 1), i + 1);
       const closes  = slice.map(c => c.close);
       const volumes = slice.map(c => c.volume);
-      const ts15    = candles[i].time;
-      const h1Slice = h1BtCandles.filter(c => c.time <= ts15).slice(-100);
-      const h4Slice = h4BtCandles.filter(c => c.time <= ts15).slice(-100);
       const sig     = generateSignal(closes, slice, volumes, cfg, h1Slice, h4Slice);
       if (!sig || sig.score < cfg.SIG_THRESHOLD || !sig.risk.pass) continue;
+
       const ts = candles[i].time;
       const dir = sig.direction;
       if (ts - lastSigTs[dir] < DEDUP_MS) continue;
       lastSigTs[dir] = ts;
+
       const stop = dir === 'BUY' ? sig.stopLong : sig.stopShort;
-      const res  = btJudgeOutcome(ts, dir, sig.raw.last, parseFloat(stop), candles, cfg);
+      // 用索引法替代 filter，O(1) 定位 future 起点
+      const res  = btJudgeOutcome(i, dir, sig.raw.last, parseFloat(stop), candles, cfg);
       results.push({ ts, dir, score: sig.score, price: sig.raw.last, marketState: sig.marketState, h4Trend: sig.h4Trend, ...res });
       const icon = res.status === 'WIN' ? '<span class="win">✓</span>' : res.status === 'LOSS' ? '<span class="loss">✗</span>' : '<span class="draw">⏸</span>';
       const time = new Date(ts).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
       const mktTag = sig.marketState === 'RANGING' ? '' : sig.marketState === 'TRENDING_UP' ? ' <span style="color:var(--green)">[趋势↑]</span>' : ' <span style="color:var(--red)">[趋势↓]</span>';
-      log.innerHTML += `${icon} [${time}] ${dir} @$${sig.raw.last.toFixed(0)} 分:${sig.score}${mktTag} → ${res.status} (${res.pnlR>=0?'+':''}${res.pnlR.toFixed(2)}R)<br>`;
-      log.scrollTop = log.scrollHeight;
+      logBuf += `${icon} [${time}] ${dir} @$${sig.raw.last.toFixed(0)} 分:${sig.score}${mktTag} → ${res.status} (${res.pnlR>=0?'+':''}${res.pnlR.toFixed(2)}R)<br>`;
     }
+    // 刷新剩余日志
+    if (logBuf) { log.innerHTML += logBuf; log.scrollTop = log.scrollHeight; }
 
     const wins   = results.filter(r => r.status==='WIN');
     const losses = results.filter(r => r.status==='LOSS');
