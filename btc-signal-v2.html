@@ -565,9 +565,9 @@ footer {
   <div class="bt-header">
     <span class="bt-label">内置回测</span>
     <select class="bt-select" id="btDays">
-      <option value="30">30天</option>
-      <option value="60">60天</option>
-      <option value="90" selected>90天</option>
+      <option value="90">90天</option>
+      <option value="180">180天</option>
+      <option value="365" selected>365天</option>
     </select>
     <select class="bt-select" id="btPreset">
       <option value="base">基准</option>
@@ -1932,7 +1932,7 @@ async function runBacktest() {
       lastSigTs[dir] = ts;
       const stop = dir === 'BUY' ? sig.stopLong : sig.stopShort;
       const res  = btJudgeOutcome(ts, dir, sig.raw.last, parseFloat(stop), candles, cfg);
-      results.push({ ts, dir, score: sig.score, price: sig.raw.last, marketState: sig.marketState, ...res });
+      results.push({ ts, dir, score: sig.score, price: sig.raw.last, marketState: sig.marketState, h4Trend: sig.h4Trend, ...res });
       const icon = res.status === 'WIN' ? '<span class="win">✓</span>' : res.status === 'LOSS' ? '<span class="loss">✗</span>' : '<span class="draw">⏸</span>';
       const time = new Date(ts).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
       const mktTag = sig.marketState === 'RANGING' ? '' : sig.marketState === 'TRENDING_UP' ? ' <span style="color:var(--green)">[趋势↑]</span>' : ' <span style="color:var(--red)">[趋势↓]</span>';
@@ -1981,21 +1981,22 @@ async function runBacktest() {
 
     log.innerHTML += `<br>─── 完成 [${cfg.name}] ─── 信号:${results.length} WIN:${wins.length} LOSS:${losses.length} 胜率:${total>0?(wr*100).toFixed(1)+'%':'—'} 期望:${ev!=null?(ev>=0?'+':'')+ev.toFixed(3)+'R':'—'}`;
 
-    // 市场状态分组统计
-    const states = ['RANGING', 'TRENDING_UP', 'TRENDING_DOWN'];
-    const stateLabel = { RANGING: 'RANGING    ', TRENDING_UP: 'TRENDING_UP', TRENDING_DOWN: 'TRENDING_DN' };
-    const hasAny = results.some(r => r.marketState);
-    if (hasAny) {
-      log.innerHTML += '<br><br>市场状态分解：';
-      for (const st of states) {
-        const grp  = results.filter(r => r.marketState === st);
+    // 4h趋势分组统计
+    const hasH4 = results.some(r => r.h4Trend);
+    if (hasH4) {
+      log.innerHTML += '<br><br>4h趋势分解：';
+      for (const [trend, label, color] of [
+        ['bull', 'bull（4h多头）', 'var(--green)'],
+        ['bear', 'bear（4h空头）', 'var(--red)'],
+        [null,   '未知（4h数据不足）', 'var(--text-muted)'],
+      ]) {
+        const grp = results.filter(r => r.h4Trend === trend);
         if (grp.length === 0) continue;
-        const gW   = grp.filter(r => r.status === 'WIN').length;
-        const gL   = grp.filter(r => r.status === 'LOSS').length;
-        const gT   = gW + gL;
-        const gWR  = gT > 0 ? (gW / gT * 100).toFixed(0) + '%' : '—';
-        const color = st === 'TRENDING_UP' ? 'var(--green)' : st === 'TRENDING_DOWN' ? 'var(--red)' : 'var(--text-muted)';
-        log.innerHTML += `<br><span style="color:${color}">${stateLabel[st]}</span>  ${grp.length}笔  WIN:${gW} LOSS:${gL}  胜率${gWR}`;
+        const gW  = grp.filter(r => r.status === 'WIN').length;
+        const gL  = grp.filter(r => r.status === 'LOSS').length;
+        const gT  = gW + gL;
+        const gWR = gT > 0 ? (gW / gT * 100).toFixed(0) + '%' : '—';
+        log.innerHTML += `<br><span style="color:${color}">${label}</span>  ${grp.length}笔  WIN:${gW} LOSS:${gL}  胜率${gWR}`;
       }
     }
 
