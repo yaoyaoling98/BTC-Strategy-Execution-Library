@@ -977,7 +977,7 @@ function riskCheck(direction, ema20, ema50) {
 }
 
 /* ── Signal engine ───────────────────────────────────────── */
-function generateSignal(closes, candles, volumes, cfg, h1Candles) {
+function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
     cfg = cfg || PRESETS.base;
     const last     = closes[closes.length - 1];
     const rsi      = calcRSI(closes);
@@ -1689,12 +1689,14 @@ async function runSignal() {
     if (signalRunning) return;
     signalRunning = true;
     try {
-        const [candles, h1Candles] = await Promise.all([fetchOHLC(15), fetchOHLC(60)]);
+        const [candles, h1Candles, h4Candles] = await Promise.all([
+            fetchOHLC(15), fetchOHLC(60), fetchOHLC(240)
+        ]);
         const closes  = candles.map(c => c.close);
         const volumes = candles.map(c => c.volume);
 
         updateOpenSignals(candles);
-        const sig = generateSignal(closes, candles, volumes, null, h1Candles);
+        const sig = generateSignal(closes, candles, volumes, null, h1Candles, h4Candles);
         renderSignalCard(sig);
         renderInsightCard(sig);
         renderIndicatorPanel(sig);
