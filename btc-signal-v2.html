@@ -605,7 +605,7 @@ const PRESETS = {
         name: '基准',
         EMA_SHORT: 20, EMA_LONG: 50,
         STOP_LOSS_PCT: 0.015, TAKE_PROFIT_PCT: 0.020,
-        SIG_THRESHOLD: 65,
+        SIG_THRESHOLD: 70,
         ATR_SL_MULT: 1.0, ATR_TP_MULT: 1.5,
         ADX_MIN: 15, ADX_MID: 20, ADX_MID_SCORE: 80,
         ENTRY_DISTANCE_PCT: 0,
@@ -1022,18 +1022,63 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
     if (direction === 'SELL' && !(rsi < rsiPrev1 && rsiPrev1 < rsiPrev2)) totalScore = Math.max(0, totalScore - 15);
     totalScore = Math.min(100, totalScore);
 
+    // 硬拦截1：成交量异常（操控过滤，不可交易）
+    // 硬拦截2：15m EMA方向（riskCheck 内实现）
     const risk = volSpike
         ? { pass: false, reason: 'Vol spike >20× avg — manipulation filter' }
         : riskCheck(direction, ema20, ema50);
+
+    // ADX 震荡市 → 扣20分
+    const adxData = calcADX(candles);
+    const adx = adxData ? adxData.adx : 25;
+    if (adx < cfg.ADX_MIN) totalScore = Math.max(0, totalScore - 20);
+
+    // 缩量 → 扣15分
+    if (volConfirm === 'weak') totalScore = Math.max(0, totalScore - 15);
+
+    // 1h趋势反向 → 扣15分
+    let h1Trend = null;
+    if (h1Candles && h1Candles.length >= 55) {
+        const h1Closes = h1Candles.map(c => c.close);
+        const h1Ema20  = calcEMA(h1Closes, 20);
+        const h1Ema50  = calcEMA(h1Closes, 50);
+        h1Trend = h1Ema20 > h1Ema50 ? 'bull' : 'bear';
+        if ((direction === 'BUY'  && h1Ema20 <= h1Ema50) ||
+            (direction === 'SELL' && h1Ema20 >= h1Ema50))
+            totalScore = Math.max(0, totalScore - 15);
+    }
+
+    // 4h趋势反向 → 扣20分
+    let h4Ema20 = null, h4Ema50 = null;
+    if (h4Candles && h4Candles.length >= 55) {
+        const h4Closes = h4Candles.map(c => c.close);
+        h4Ema20 = calcEMA(h4Closes, 20);
+        h4Ema50 = calcEMA(h4Closes, 50);
+        if ((direction === 'BUY'  && h4Ema20 <= h4Ema50) ||
+            (direction === 'SELL' && h4Ema20 >= h4Ema50))
+            totalScore = Math.max(0, totalScore - 20);
+    }
+    const h4Trend = h4Ema20 !== null ? (h4Ema20 > h4Ema50 ? 'bull' : 'bear') : null;
+
+    // 反转K线未出现 → 扣10分
+    if (candles.length >= 3) {
+        const cur  = candles[candles.length - 1];
+        const prev = candles[candles.length - 2];
+        if (direction === 'BUY') {
+            if (!(cur.close > cur.open && cur.close > prev.close))
+                totalScore = Math.max(0, totalScore - 10);
+        } else if (direction === 'SELL') {
+            if (!(cur.close < cur.open && cur.close < prev.close))
+                totalScore = Math.max(0, totalScore - 10);
+        }
+    }
+
+    totalScore = Math.min(100, totalScore);
 
     const strength = totalScore >= 85 ? '🔥 强信号'
                    : totalScore >= cfg.SIG_THRESHOLD ? '✓ 标准信号'
                    : totalScore >= 60 ? '⚠ 弱信号'
                    : '未达阈值';
-
-    // ADX 趋势强度过滤（ADX<20 = 震荡市，暂停信号）
-    const adxData = calcADX(candles);
-    const adx = adxData ? adxData.adx : 25;
 
     // ATR 动态止损（Freqtrade 社区标准，BTC 15m）
     const atr = calcATR(candles);
@@ -1057,62 +1102,10 @@ function generateSignal(closes, candles, volumes, cfg, h1Candles, h4Candles) {
         rrRatio   = (cfg.TAKE_PROFIT_PCT / cfg.STOP_LOSS_PCT).toFixed(1);
     }
 
-    let finalRisk = (adx < cfg.ADX_MIN && risk.pass)
-        ? { pass: false, reason: `ADX ${adx.toFixed(0)} < ${cfg.ADX_MIN}，震荡市，信号暂停` }
-        : risk;
-
-    if (finalRisk.pass && volConfirm === 'weak')
-        finalRisk = { pass: false, reason: '缩量信号，可靠性低' };
-
-    let h1Trend = null;
-    if (h1Candles && h1Candles.length >= 55) {
-        const h1Closes = h1Candles.map(c => c.close);
-        const h1Ema20  = calcEMA(h1Closes, 20);
-        const h1Ema50  = calcEMA(h1Closes, 50);
-        h1Trend = h1Ema20 > h1Ema50 ? 'bull' : 'bear';
-        if (finalRisk.pass) {
-            if (direction === 'BUY'  && h1Ema20 <= h1Ema50)
-                finalRisk = { pass: false, reason: '1h趋势反向，信号降级' };
-            if (direction === 'SELL' && h1Ema20 >= h1Ema50)
-                finalRisk = { pass: false, reason: '1h趋势反向，信号降级' };
-        }
-    }
-
-    let h4Ema20 = null, h4Ema50 = null;
-    if (h4Candles && h4Candles.length >= 55) {
-        const h4Closes = h4Candles.map(c => c.close);
-        h4Ema20 = calcEMA(h4Closes, 20);
-        h4Ema50 = calcEMA(h4Closes, 50);
-        if (finalRisk.pass) {
-            if (direction === 'BUY'  && h4Ema20 <= h4Ema50)
-                finalRisk = { pass: false, reason: '4h趋势向下，禁止做多' };
-            if (direction === 'SELL' && h4Ema20 >= h4Ema50)
-                finalRisk = { pass: false, reason: '4h趋势向上，禁止做空' };
-        }
-    }
-    const h4Trend = h4Ema20 !== null ? (h4Ema20 > h4Ema50 ? 'bull' : 'bear') : null;
-
-    // 反转确认过滤：要求最后一根K线出现反转方向
-    if (finalRisk.pass && candles.length >= 3) {
-        const cur  = candles[candles.length - 1];
-        const prev = candles[candles.length - 2];
-        if (direction === 'BUY') {
-            const isBullCandle  = cur.close > cur.open;
-            const isPriceRising = cur.close > prev.close;
-            if (!isBullCandle || !isPriceRising)
-                finalRisk = { pass: false, reason: '尚未出现反转K线，等待确认' };
-        } else if (direction === 'SELL') {
-            const isBearCandle   = cur.close < cur.open;
-            const isPriceFalling = cur.close < prev.close;
-            if (!isBearCandle || !isPriceFalling)
-                finalRisk = { pass: false, reason: '尚未出现反转K线，等待确认' };
-        }
-    }
-
     const marketState = detectMarketState(bb, ema20, ema50, last);
 
     return {
-        score: totalScore, direction, strength, risk: finalRisk,
+        score: totalScore, direction, strength, risk,
         scores: { rsi: rsiR.score, bb: bbR.score, vwap: vwapR.score, mfi: mfiR.score, vBonus },
         votes:  { rsi: rsiR.vote,  bb: bbR.vote,  vwap: vwapR.vote,  mfi: mfiR.vote  },
         raw:    { rsi, bb, vwap, ema20, ema50, volRatio, mfi, volSpike, vBottom, last },
