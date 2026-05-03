@@ -1235,7 +1235,7 @@ async function autoBackfill() {
         const slice   = uniq.slice(0, i + 1);
         const closes  = slice.map(c => c.close);
         const volumes = slice.map(c => c.volume);
-        const sig     = generateSignal(closes, slice, volumes);
+        const sig     = generateSignal(closes, slice, volumes, PRESETS.base, [], []);
         if (!sig || sig.score < PRESETS.base.SIG_THRESHOLD || !sig.risk.pass) continue;
 
         const ts = uniq[i].time;
